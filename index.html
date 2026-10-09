@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111317">
+<title>Tasks</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>Tasks</h1>
+  <div id="who" class="seg" role="group" aria-label="Whose tasks">
+    <button type="button" id="who-all" class="seg-btn" aria-pressed="true">All</button>
+    <button type="button" id="who-mine" class="seg-btn" aria-pressed="false">Mine</button>
+  </div>
+  <div class="bar-right">
+    <span id="status" class="status" title="sync status" aria-live="polite"></span>
+    <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+
+<nav class="filters" aria-label="Visible task states">
+  <label class="chip chip-flagged">
+    <input type="checkbox" id="f-flagged" checked>
+    <span class="chip-face"><span class="gly">▲</span> Flagged <b id="c-flagged">0</b></span>
+  </label>
+  <label class="chip chip-normal">
+    <input type="checkbox" id="f-normal" checked>
+    <span class="chip-face"><span class="gly">●</span> Normal <b id="c-normal">0</b></span>
+  </label>
+  <label class="chip chip-waiting">
+    <input type="checkbox" id="f-waiting" checked>
+    <span class="chip-face"><span class="gly">◷</span> Waiting <b id="c-waiting">0</b></span>
+  </label>
+</nav>
+
+<main id="list" class="list"></main>
+
+<p id="empty" class="empty" hidden></p>
+
+<div id="dragbar" class="dragbar" hidden>
+  <span>Reorder mode — drag to move</span>
+  <button id="dragdone" class="primary">Done</button>
+</div>
+
+<form id="add" class="add" autocomplete="off">
+  <select id="add-topic" aria-label="Topic"></select>
+  <select id="add-owner" class="owner-pick" aria-label="Owner"></select>
+  <input id="add-text" type="text" dir="auto" placeholder="Add a task" aria-label="New task" enterkeyhint="done">
+  <button type="submit" class="primary" aria-label="Add">+</button>
+</form>
+
+<div id="snackbar" class="snackbar" hidden>
+  <span id="snackbar-text"></span>
+  <button id="undo" class="link">Undo</button>
+</div>
+
+<dialog id="detail" class="sheet">
+  <form method="dialog">
+    <h2>Task</h2>
+    <label class="field">
+      <span>Task</span>
+      <textarea id="d-text" dir="auto" rows="2"></textarea>
+    </label>
+    <div class="field-row">
+      <label class="field">
+        <span>Topic</span>
+        <select id="d-topic"></select>
+      </label>
+      <label class="field" id="d-owner-field">
+        <span>Owner</span>
+        <select id="d-owner"></select>
+      </label>
+    </div>
+    <label class="field">
+      <span>Note <em>(hidden on the list)</em></span>
+      <textarea id="d-note" dir="auto" rows="6" placeholder="Detail you don't want on the main list"></textarea>
+    </label>
+    <p id="d-age" class="muted"></p>
+    <menu>
+      <button value="cancel" class="link">Cancel</button>
+      <button id="d-save" value="save" class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="settings" class="sheet">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <p id="s-intro" class="muted">Stored on this device only. The token is never sent anywhere but GitHub.</p>
+    <label class="field" id="s-me-field"><span>This is me</span><select id="s-me"></select></label>
+    <label class="field"><span>Token <a id="s-token-help" class="inline-link" target="_blank" rel="noopener">how to make one</a></span><input id="s-token" type="password" placeholder="github_pat_..." autocapitalize="off" spellcheck="false"></label>
+    <label class="field"><span>Token expires <em>(optional; leave blank if it doesn't)</em></span><input id="s-expires" type="date"></label>
+    <details class="advanced">
+      <summary>Where the tasks live</summary>
+      <label class="field"><span>GitHub account <em>(the org that holds the data repo)</em></span><input id="s-owner" type="text" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Data repo</span><input id="s-repo" type="text" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>File path</span><input id="s-path" type="text" autocapitalize="off" spellcheck="false"></label>
+    </details>
+    <p id="s-msg" class="muted"></p>
+    <menu>
+      <button value="cancel" class="link">Cancel</button>
+      <button id="s-save" value="save" class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
