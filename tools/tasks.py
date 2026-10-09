@@ -398,10 +398,15 @@ class GitBackend:
             self._identity = res.returncode == 0 and bool(res.stdout.strip())
         return self._identity
 
+    def _fetch(self):
+        # An explicit refspec: a clone made while the repo was still empty has
+        # no fetch rule, and a plain fetch would leave origin/<branch> missing.
+        self.git("fetch", "-q", "origin", f"+refs/heads/{self.branch}:refs/remotes/origin/{self.branch}")
+
     def _sync_to_remote(self):
         """Bring the clone to the remote's latest commit, refusing to discard
         anything that was never pushed."""
-        self.git("fetch", "-q", "origin", self.branch)
+        self._fetch()
         remote = f"origin/{self.branch}"
         if self.git("status", "--porcelain").stdout.strip():
             raise BoardError(f"{self.dir} has uncommitted changes; commit and push them, or discard them, first")
@@ -438,7 +443,7 @@ class GitBackend:
             # The other writer pushed first. Drop our commit, take theirs, and
             # re-apply the same change on top.
             time.sleep(0.5 * (attempt + 1))
-            self.git("fetch", "-q", "origin", self.branch)
+            self._fetch()
             self.git("reset", "-q", "--hard", f"origin/{self.branch}")
         raise BoardError("gave up after repeated push conflicts; nothing was saved")
 

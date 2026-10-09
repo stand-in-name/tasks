@@ -282,6 +282,18 @@ def test_git_push_rejected_mid_write_is_replayed_on_the_fresh_copy(remote, tmp_p
     assert next(t for t in s["tasks"] if t["id"] == "t_aab222")["state"] == "flagged"
 
 
+def test_git_works_in_a_clone_with_no_fetch_rule(remote, tmp_path):
+    """A clone made while the repo was still empty has no fetch rule; the
+    tool must not depend on one."""
+    a = clone(remote, tmp_path / "a")
+    git(a, "config", "--unset-all", "remote.origin.fetch")
+    git(a, "update-ref", "-d", "refs/remotes/origin/main")
+    assert "call Dana" in run("--clone", str(a), "list").stdout
+    run("--clone", str(a), "add", "from a bare clone")
+    check = clone(remote, tmp_path / "check")
+    assert "from a bare clone" in [t["text"] for t in load(check / "tasks.json")["tasks"]]
+
+
 def test_git_refuses_to_discard_local_work(remote, tmp_path):
     a = clone(remote, tmp_path / "a")
     (a / "tasks.json").write_text("{}", encoding="utf-8")
