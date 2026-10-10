@@ -13,7 +13,11 @@
 <body>
 
 <header class="bar">
-  <h1>Tasks</h1>
+  <h1 class="sr-only">Tasks and people</h1>
+  <div id="lists" class="seg" role="group" aria-label="Which list">
+    <button type="button" id="list-tasks" class="seg-btn" aria-pressed="true">Tasks</button>
+    <button type="button" id="list-people" class="seg-btn" aria-pressed="false">People</button>
+  </div>
   <div id="who" class="seg" role="group" aria-label="Whose tasks">
     <button type="button" id="who-all" class="seg-btn" aria-pressed="true">All</button>
     <button type="button" id="who-mine" class="seg-btn" aria-pressed="false">Mine</button>
@@ -26,7 +30,7 @@
 
 <div id="banner" class="banner" hidden></div>
 
-<nav class="filters" aria-label="Visible task states">
+<nav id="tfilters" class="filters" aria-label="Visible task states">
   <label class="chip chip-flagged">
     <input type="checkbox" id="f-flagged" checked>
     <span class="chip-face"><span class="gly">▲</span> Flagged <b id="c-flagged">0</b></span>
@@ -45,6 +49,27 @@
 
 <p id="empty" class="empty" hidden></p>
 
+<div id="pfilters" class="pfilters" hidden>
+  <input id="p-q" type="search" dir="auto" placeholder="Search people, tags, notes" aria-label="Search people" autocomplete="off">
+  <nav class="filters" aria-label="People filters">
+    <label class="chip chip-now">
+      <input type="checkbox" id="pf-now">
+      <span class="chip-face" id="pf-now-label">Now</span>
+    </label>
+    <select id="pf-role" class="chip-select" aria-label="Role"></select>
+    <select id="pf-tag" class="chip-select" aria-label="Tag"></select>
+    <select id="pf-tie" class="chip-select" aria-label="Tie"></select>
+    <label class="chip">
+      <input type="checkbox" id="pf-update">
+      <span class="chip-face">Gets update</span>
+    </label>
+  </nav>
+</div>
+
+<main id="plist" class="list" hidden></main>
+
+<p id="pempty" class="empty" hidden></p>
+
 <div id="dragbar" class="dragbar" hidden>
   <span>Reorder mode — drag to move</span>
   <button id="dragdone" class="primary">Done</button>
@@ -55,6 +80,11 @@
   <select id="add-owner" class="owner-pick" aria-label="Owner"></select>
   <input id="add-text" type="text" dir="auto" placeholder="Add a task" aria-label="New task" enterkeyhint="done">
   <button type="submit" class="primary" aria-label="Add">+</button>
+</form>
+
+<form id="padd" class="add" autocomplete="off" hidden>
+  <input id="padd-text" type="text" dir="auto" placeholder="Name, what they do #tag @gal" aria-label="New person" enterkeyhint="done">
+  <button type="submit" class="primary" aria-label="Add person">+</button>
 </form>
 
 <div id="snackbar" class="snackbar" hidden>
@@ -91,6 +121,74 @@
   </form>
 </dialog>
 
+<dialog id="pmany" class="sheet">
+  <form method="dialog">
+    <h2>Add many people</h2>
+    <p class="muted">One person per line: a name, a comma, then what they do. <b>#tag</b> adds an expertise tag, <b>+role</b> a role (+expert, +champion), and <b>@gal</b> or <b>@gur</b> who knows them. Without an @, they're yours.</p>
+    <label class="field">
+      <span>People</span>
+      <textarea id="pm-text" dir="auto" rows="10" placeholder="Dana Levi, head baker at a bakery chain #baking +expert @gal&#10;Yoni Ben-David, history professor #history +champion"></textarea>
+    </label>
+    <menu>
+      <button value="cancel" class="link">Cancel</button>
+      <button id="pm-add" value="add" class="primary">Add all</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="pdetail" class="sheet">
+  <form method="dialog">
+    <!-- Focus lands on the title, not the name box, so opening a card to read it
+         doesn't throw up the keyboard. -->
+    <h2 tabindex="-1" autofocus>Person</h2>
+    <label class="field"><span>Name</span><input id="pd-name" type="text" dir="auto"></label>
+    <label class="field"><span>What they do <em>(one line)</em></span><input id="pd-line" type="text" dir="auto"></label>
+    <div class="field-row">
+      <label class="field"><span>Organization</span><input id="pd-org" type="text" dir="auto"></label>
+      <label class="field"><span>Email</span><input id="pd-email" type="email" autocapitalize="off" spellcheck="false"></label>
+    </div>
+    <label class="field"><span>Expertise tags <em>(comma separated)</em></span><input id="pd-tags" type="text" dir="auto" autocapitalize="off"></label>
+    <div class="field"><span>Roles</span><div id="pd-roles" class="chips"></div></div>
+    <div class="field"><span>Who knows them</span><div id="pd-known" class="chips"></div></div>
+    <label class="field"><span>Or who could introduce you</span><input id="pd-intro" type="text" dir="auto"></label>
+    <div class="field-row">
+      <label class="field"><span>Tie</span><select id="pd-tie"></select></label>
+      <label class="field"><span>Keep in touch</span><select id="pd-every"></select></label>
+    </div>
+    <label class="check"><input type="checkbox" id="pd-update"> <span>Gets our periodic update</span></label>
+    <label class="field"><span>Next step</span><input id="pd-next" type="text" dir="auto"></label>
+    <label class="field"><span>Notes</span><textarea id="pd-notes" dir="auto" rows="4"></textarea></label>
+    <label class="field"><span>Notes file in start-up <a id="pd-file-link" class="inline-link" target="_blank" rel="noopener" hidden>open</a></span><input id="pd-file" type="text" placeholder="knowledge/people/first-last.md" autocapitalize="off" spellcheck="false"></label>
+
+    <div class="field">
+      <span>Contact log</span>
+      <p id="pd-last" class="muted"></p>
+      <div class="log-add">
+        <input id="pd-log-text" type="text" dir="auto" placeholder="What happened: a call, a coffee, an update" aria-label="What happened">
+        <input id="pd-log-date" type="date" aria-label="Date">
+        <button type="button" id="pd-log-add" class="primary">Log</button>
+      </div>
+      <ul id="pd-log" class="log"></ul>
+    </div>
+
+    <div class="field">
+      <span>Task on the board</span>
+      <div class="task-from">
+        <select id="pd-task-owner" aria-label="Task owner"></select>
+        <button type="button" id="pd-task-add" class="link">Add “Talk to …” to the board</button>
+      </div>
+      <p id="pd-task-msg" class="muted"></p>
+    </div>
+
+    <menu>
+      <button id="pd-remove" value="remove" class="link danger">Remove</button>
+      <span class="grow"></span>
+      <button value="cancel" class="link">Cancel</button>
+      <button id="pd-save" value="save" class="primary">Save</button>
+    </menu>
+  </form>
+</dialog>
+
 <dialog id="settings" class="sheet">
   <form method="dialog">
     <h2>Settings</h2>
@@ -98,6 +196,7 @@
     <label class="field" id="s-me-field"><span>This is me</span><select id="s-me"></select></label>
     <label class="field"><span>Token <a id="s-token-help" class="inline-link" target="_blank" rel="noopener">how to make one</a></span><input id="s-token" type="password" placeholder="github_pat_..." autocapitalize="off" spellcheck="false"></label>
     <label class="field"><span>Token expires <em>(optional; leave blank if it doesn't)</em></span><input id="s-expires" type="date"></label>
+    <label class="field" id="s-stage-field"><span>Our stage <em>(People → Now shows who matters in it)</em></span><select id="s-stage"></select></label>
     <details class="advanced">
       <summary>Where the tasks live</summary>
       <label class="field"><span>GitHub account <em>(the org that holds the data repo)</em></span><input id="s-owner" type="text" autocapitalize="off" spellcheck="false"></label>

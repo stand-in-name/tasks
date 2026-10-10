@@ -42,6 +42,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 # --- the board: mirrors logic.js -------------------------------------------
 # Same shape, same key order, same mutations. tests/test_cli.py checks that a
@@ -335,6 +336,14 @@ def commit_message(mutations):
     return f"tasks: {len(mutations)} changes"
 
 
+# What the backends need to handle a list. tools/people.py passes its own, so
+# the People list shares every line of the sync and conflict handling below.
+BOARD = SimpleNamespace(
+    label="board", empty_state=empty_state, deserialize=deserialize, serialize=serialize,
+    apply_all=apply_all, commit_message=commit_message,
+)
+
+
 # --- where things are kept ---------------------------------------------------
 
 
@@ -355,28 +364,30 @@ class BoardError(Exception):
 
 
 class FileBackend:
-    def __init__(self, path):
+    def __init__(self, path, codec=BOARD):
         self.path = Path(path)
+        self.codec = codec
 
     def load(self):
         if not self.path.exists():
-            return empty_state()
-        state = deserialize(self.path.read_text(encoding="utf-8"))
+            return self.codec.empty_state()
+        state = self.codec.deserialize(self.path.read_text(encoding="utf-8"))
         if state is None:
-            raise BoardError(f"{self.path} is not a valid board file")
+            raise BoardError(f"{self.path} is not a valid {self.codec.label} file")
         return state
 
     def update(self, mutations):
         before = self.load()
-        after = apply_all(before, mutations)
+        after = self.codec.apply_all(before, mutations)
         if after != before:
-            self.path.write_text(serialize(after), encoding="utf-8", newline="\n")
+            self.path.write_text(self.codec.serialize(after), encoding="utf-8", newline="\n")
         return after
 
 
 class GitBackend:
-    def __init__(self, clone, path="tasks.json", branch="main", attempts=5):
+    def __init__(self, clone, path="tasks.json", branch="main", attempts=5, codec=BOARD):
         self.dir = Path(clone)
+        self.codec = codec
         self.path = path
         self.branch = branch
         self.attempts = attempts
@@ -418,10 +429,10 @@ class GitBackend:
     def _read(self):
         f = self.dir / self.path
         if not f.exists():
-            return empty_state()
-        state = deserialize(f.read_text(encoding="utf-8"))
+            return self.codec.empty_state()
+        state = self.codec.deserialize(f.read_text(encoding="utf-8"))
         if state is None:
-            raise BoardError(f"{f} is not a valid board file")
+            raise BoardError(f"{f} is not a valid {self.codec.label} file")
         return state
 
     def load(self):
@@ -432,12 +443,12 @@ class GitBackend:
         self._sync_to_remote()
         for attempt in range(self.attempts):
             before = self._read()
-            after = apply_all(before, mutations)
+            after = self.codec.apply_all(before, mutations)
             if after == before:
                 return after
-            (self.dir / self.path).write_text(serialize(after), encoding="utf-8", newline="\n")
+            (self.dir / self.path).write_text(self.codec.serialize(after), encoding="utf-8", newline="\n")
             self.git("add", self.path)
-            self.git("commit", "-q", "-m", commit_message(mutations))
+            self.git("commit", "-q", "-m", self.codec.commit_message(mutations))
             if self.git("push", "-q", "origin", f"HEAD:{self.branch}", check=False).returncode == 0:
                 return after
             # The other writer pushed first. Drop our commit, take theirs, and
@@ -453,7 +464,8 @@ class ApiBackend:
     API = os.environ.get("TASKS_API", "https://api.github.com")
     STALE_WINDOW = 15  # seconds; see store.js
 
-    def __init__(self, repo, token, path="tasks.json", branch="main", attempts=4):
+    def __init__(self, repo, token, path="tasks.json", branch="main", attempts=4, codec=BOARD):
+        self.codec = codec
         if not repo or "/" not in repo:
             raise BoardError("set TASKS_REPO to org/repo (for example stand-in-name/tasks-data), or use --clone or --file")
         if not token:
@@ -515,14 +527,14 @@ class ApiBackend:
         while True:
             status, body = self._request("GET", f"{self.url}?ref={self.branch}&t={time.time()}")
             if status == 404:
-                return empty_state(), None
+                return self.codec.empty_state(), None
             if status != 200:
                 raise BoardError(f"GitHub read failed ({status})")
             if not stale or body.get("sha") != stale or time.time() > deadline:
                 break
             time.sleep(0.4)
         text = base64.b64decode(body["content"]).decode("utf-8")
-        return deserialize(text) or empty_state(), body.get("sha")
+        return self.codec.deserialize(text) or self.codec.empty_state(), body.get("sha")
 
     def load(self):
         return self._get()[0]
@@ -530,12 +542,12 @@ class ApiBackend:
     def update(self, mutations):
         for attempt in range(self.attempts):
             before, sha = self._get()
-            after = apply_all(before, mutations)
+            after = self.codec.apply_all(before, mutations)
             if after == before:
                 return after
             payload = {
-                "message": commit_message(mutations),
-                "content": base64.b64encode(serialize(after).encode("utf-8")).decode("ascii"),
+                "message": self.codec.commit_message(mutations),
+                "content": base64.b64encode(self.codec.serialize(after).encode("utf-8")).decode("ascii"),
                 "branch": self.branch,
             }
             if sha:

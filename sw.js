@@ -1,6 +1,6 @@
 // App-shell cache. Bump CACHE whenever the shell changes — the old cache is
 // dropped on activate, so the phone can't get stuck on a stale build.
-const CACHE = 'tasks-v1';
+const CACHE = 'tasks-v2';
 
 const SHELL = [
   './',
@@ -8,6 +8,7 @@ const SHELL = [
   './style.css',
   './app.js',
   './logic.js',
+  './people.js',
   './store.js',
   './sync.js',
   './manifest.webmanifest',

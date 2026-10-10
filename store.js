@@ -1,8 +1,10 @@
 // Storage. One implementation of the read/write/conflict protocol, used by the
-// app; tools/tasks.py speaks the same GitHub Contents API against the same
-// file, so there is exactly one storage contract to reason about.
+// app for both lists; tools/tasks.py speaks the same GitHub Contents API
+// against the same files, so there is exactly one storage contract to reason
+// about. What differs between the lists is the codec: how a file is read and
+// written, and how a change is applied and described.
 
-import { deserialize, serialize, emptyState, applyAll } from './logic.js';
+import { deserialize, serialize, emptyState, applyAll, applyMutation } from './logic.js';
 
 export const API = 'https://api.github.com';
 
@@ -37,9 +39,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export class GitHubStore {
   constructor({
     owner, repo, path = 'tasks.json', branch = 'main', token, fetchImpl,
-    retryDelays = [400, 1000, 2000], now = () => Date.now(), api = API,
+    retryDelays = [400, 1000, 2000], now = () => Date.now(), api = API, codec = TASKS_CODEC,
   }) {
-    Object.assign(this, { owner, repo, path, branch, token, retryDelays, now, api });
+    Object.assign(this, { owner, repo, path, branch, token, retryDelays, now, api, codec });
     this.fetch = fetchImpl || ((...a) => fetch(...a));
     this.sha = null;
     this.replaced = new Map(); // sha of a copy we wrote over -> when
@@ -68,10 +70,11 @@ export class GitHubStore {
       throw new OfflineError(e.message);
     }
     if (res.status === 401 || res.status === 403) throw new AuthError(`GitHub rejected the token (${res.status})`);
-    if (res.status === 404) return { sha: null, state: emptyState() }; // first run: no file yet
+    const c = this.codec;
+    if (res.status === 404) return { sha: null, state: c.emptyState() }; // first run: no file yet
     if (!res.ok) throw new Error(`GitHub load failed: ${res.status}`);
     const body = await res.json();
-    return { sha: body.sha, state: deserialize(fromBase64(body.content)) || emptyState() };
+    return { sha: body.sha, state: c.deserialize(fromBase64(body.content)) || c.emptyState() };
   }
 
   async load() {
@@ -95,9 +98,10 @@ export class GitHubStore {
   // reload and replay `mutations` on top of the fresh state instead of
   // clobbering it, then retry. This is why every UI action is a mutation.
   async save(state, mutations = [], attempt = 0) {
+    const c = this.codec;
     const payload = {
-      message: commitMessage(mutations),
-      content: toBase64(serialize(state)),
+      message: c.commitMessage(mutations),
+      content: toBase64(c.serialize(state)),
       branch: this.branch,
     };
     if (this.sha) payload.sha = this.sha;
@@ -120,7 +124,7 @@ export class GitHubStore {
       // still be stale, hence the growing pause before each retry.
       await sleep(this.retryDelays[attempt]);
       const fresh = await this.load();
-      const merged = applyAll(fresh, mutations);
+      const merged = c.applyAll(fresh, mutations);
       return this.save(merged, mutations, attempt + 1);
     }
 
@@ -130,7 +134,7 @@ export class GitHubStore {
     if (payload.sha) this.replaced.set(payload.sha, t);
     for (const [sha, at] of this.replaced) if (t - at >= STALE_WINDOW_MS) this.replaced.delete(sha);
     this.sha = body.content && body.content.sha;
-    return deserialize(serialize(state));
+    return c.deserialize(c.serialize(state));
   }
 }
 
@@ -150,22 +154,25 @@ export function commitMessage(mutations) {
   return `tasks: ${mutations.length} changes`;
 }
 
+export const TASKS_CODEC = { emptyState, serialize, deserialize, applyMutation, applyAll, commitMessage };
+
 // A store backed by localStorage. Used for running the app (and its tests)
 // with no network at all.
 export class LocalStore {
-  constructor({ key = 'tasks.state', storage } = {}) {
+  constructor({ key = 'tasks.state', storage, codec = TASKS_CODEC } = {}) {
     this.key = key;
+    this.codec = codec;
     this.storage = storage || (typeof localStorage !== 'undefined' ? localStorage : new MemoryStorage());
   }
   async load() {
     const raw = this.storage.getItem(this.key);
-    return (raw && deserialize(raw)) || emptyState();
+    return (raw && this.codec.deserialize(raw)) || this.codec.emptyState();
   }
   async refresh() {
     return null;
   }
   async save(state) {
-    this.storage.setItem(this.key, serialize(state));
+    this.storage.setItem(this.key, this.codec.serialize(state));
     return state;
   }
 }

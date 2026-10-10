@@ -7,19 +7,21 @@
 // polls for the other person's changes (see refresh) and lays any unsent local
 // changes on top of what it finds.
 
-import { applyMutation, applyAll, serialize, deserialize, emptyState } from './logic.js';
-import { AuthError, OfflineError } from './store.js';
+import { AuthError, OfflineError, TASKS_CODEC } from './store.js';
 
 export const QUIET_MS = 1500;
 export const KEYS = { mirror: 'tasks.mirror', queue: 'tasks.queue' };
 
 export class Sync extends EventTarget {
-  constructor({ store, storage, quietMs = QUIET_MS }) {
+  // `codec` and `keys` say which list this is; the defaults are the tasks.
+  constructor({ store, storage, quietMs = QUIET_MS, codec = TASKS_CODEC, keys = KEYS }) {
     super();
     this.store = store;
     this.storage = storage || localStorage;
     this.quietMs = quietMs;
-    this.state = emptyState();
+    this.codec = codec;
+    this.keys = keys;
+    this.state = codec.emptyState();
     this.pending = this._readQueue();
     // Starts as 'loading', not 'idle': an empty list that has not been fetched
     // yet must be distinguishable from an empty list that has.
@@ -34,10 +36,10 @@ export class Sync extends EventTarget {
   // --- lifecycle -----------------------------------------------------------
 
   async start() {
-    const mirror = this.storage.getItem(KEYS.mirror);
+    const mirror = this.storage.getItem(this.keys.mirror);
     if (mirror) {
-      const parsed = deserialize(mirror);
-      if (parsed) this.state = applyAll(parsed, this.pending);
+      const parsed = this.codec.deserialize(mirror);
+      if (parsed) this.state = this.codec.applyAll(parsed, this.pending);
       this._emit();
     }
     await this._reload();
@@ -48,7 +50,7 @@ export class Sync extends EventTarget {
     try {
       const remote = await this.store.load();
       // Anything queued while we were away still wins locally until it lands.
-      this.state = applyAll(remote, this.pending);
+      this.state = this.codec.applyAll(remote, this.pending);
       this.loaded = true;
       this._setStatus('idle');
       this._mirror();
@@ -76,7 +78,7 @@ export class Sync extends EventTarget {
         if (this.pending.length) this.flushSoon(0);
       }
       if (!remote || this._flushing) return false;
-      this.state = applyAll(remote, this.pending);
+      this.state = this.codec.applyAll(remote, this.pending);
       this._mirror();
       this._emit();
       return true;
@@ -91,7 +93,7 @@ export class Sync extends EventTarget {
   // --- writes --------------------------------------------------------------
 
   apply(mutation) {
-    this.state = applyMutation(this.state, mutation);
+    this.state = this.codec.applyMutation(this.state, mutation);
     this.pending.push(mutation);
     this._writeQueue();
     this._mirror();
@@ -118,7 +120,7 @@ export class Sync extends EventTarget {
       // Drop exactly the mutations we sent; anything queued mid-flight survives.
       this.pending = this.pending.slice(batch.length);
       this._writeQueue();
-      this.state = this.pending.length ? applyAll(saved, this.pending) : saved;
+      this.state = this.pending.length ? this.codec.applyAll(saved, this.pending) : saved;
       this.loaded = true;
       this._setStatus('idle');
       this._mirror();
@@ -160,7 +162,7 @@ export class Sync extends EventTarget {
 
   _mirror() {
     try {
-      this.storage.setItem(KEYS.mirror, serialize(this.state));
+      this.storage.setItem(this.keys.mirror, this.codec.serialize(this.state));
     } catch {
       /* quota — the remote is still the source of truth */
     }
@@ -168,7 +170,7 @@ export class Sync extends EventTarget {
 
   _readQueue() {
     try {
-      const raw = this.storage.getItem(KEYS.queue);
+      const raw = this.storage.getItem(this.keys.queue);
       const arr = raw ? JSON.parse(raw) : [];
       return Array.isArray(arr) ? arr : [];
     } catch {
@@ -178,7 +180,7 @@ export class Sync extends EventTarget {
 
   _writeQueue() {
     try {
-      this.storage.setItem(KEYS.queue, JSON.stringify(this.pending));
+      this.storage.setItem(this.keys.queue, JSON.stringify(this.pending));
     } catch {
       /* ignore */
     }

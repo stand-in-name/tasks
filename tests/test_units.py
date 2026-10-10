@@ -18,3 +18,11 @@ def test_store(page):
 
 def test_sync(page):
     report(_run(page, "runSync"))
+
+
+def test_people(page):
+    report(_run(page, "runPeople"))
+
+
+def test_people_sync(page):
+    report(_run(page, "runPeopleSync"))

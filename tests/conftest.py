@@ -171,21 +171,24 @@ def engine_name(engine):
 
 
 class FakeGitHub:
-    """One file in one repo, shared by every phone pointed at it. It is served
-    by the test server itself, same origin as the app, so it behaves the same
-    in both engines. Rejects a write whose sha is stale, exactly like the real
-    API, and can be told to serve the copy it replaced for a while (GitHub does
-    that right after a write)."""
+    """One repo with any number of files (tasks.json, people.json), shared by
+    every phone pointed at it. It is served by the test server itself, same
+    origin as the app, so it behaves the same in both engines. Rejects a write
+    whose sha is stale, exactly like the real API, and can be told to serve the
+    copy it replaced for a while (GitHub does that right after a write)."""
 
-    def __init__(self, text=None, token="test-token"):
+    def __init__(self, text=None, token="test-token", files=None):
         self.id = uuid.uuid4().hex
         self.base = f"/fake/{self.id}"
         self.token = token
-        self.text = text
-        self.sha = self._sha(text) if text is not None else None
+        self.files = {}  # path -> [text, sha]
+        if text is not None:
+            self.files["tasks.json"] = [text, self._sha(text)]
+        for path, body in (files or {}).items():
+            self.files[path] = [body, self._sha(body)]
         self.commits = []
-        self.prev = None
-        self.stale_gets = 0
+        self.prev = {}  # path -> (sha, text) of the copy last written over
+        self.stale_gets = 0  # applies to tasks.json
         self.lock = threading.Lock()
         FAKES[self.id] = self
 
@@ -193,9 +196,17 @@ class FakeGitHub:
     def _sha(text):
         return hashlib.sha1(text.encode("utf-8")).hexdigest()
 
-    def state(self):
+    @property
+    def text(self):
+        return self.files.get("tasks.json", [None])[0]
+
+    @property
+    def sha(self):
+        return self.files.get("tasks.json", [None, None])[1]
+
+    def state(self, path="tasks.json"):
         with self.lock:
-            return json.loads(self.text)
+            return json.loads(self.files[path][0])
 
     @staticmethod
     def _send(h, status, body):
@@ -210,23 +221,24 @@ class FakeGitHub:
         with self.lock:
             if h.headers.get("Authorization") != f"Bearer {self.token}":
                 return self._send(h, 401, {"message": "Bad credentials"})
+            url = h.path.split("?", 1)[0]
+            path = url.split("/contents/", 1)[1] if "/contents/" in url else "tasks.json"
+            text, sha = self.files.get(path, [None, None])
             if h.command == "GET":
-                if self.stale_gets and self.prev:
+                if path == "tasks.json" and self.stale_gets and path in self.prev:
                     self.stale_gets -= 1
-                    sha, text = self.prev
-                else:
-                    sha, text = self.sha, self.text
+                    sha, text = self.prev[path]
                 if text is None:
                     return self._send(h, 404, {"message": "Not Found"})
                 return self._send(h, 200, {"sha": sha, "content": base64.b64encode(text.encode("utf-8")).decode("ascii")})
             body = json.loads(h.rfile.read(int(h.headers["Content-Length"])))
-            if (body.get("sha") or None) != self.sha:
+            if (body.get("sha") or None) != sha:
                 return self._send(h, 409, {"message": "conflict"})
-            self.prev = (self.sha, self.text)
-            self.text = base64.b64decode(body["content"]).decode("utf-8")
-            self.sha = self._sha(self.text + str(len(self.commits)))
+            self.prev[path] = (sha, text)
+            new = base64.b64decode(body["content"]).decode("utf-8")
+            self.files[path] = [new, self._sha(new + str(len(self.commits)))]
             self.commits.append(body["message"])
-            return self._send(h, 200, {"content": {"sha": self.sha}})
+            return self._send(h, 200, {"content": {"sha": self.files[path][1]}})
 
 
 def connected(person, owner="stand-in-name", repo="tasks-data", token="test-token", api=None):

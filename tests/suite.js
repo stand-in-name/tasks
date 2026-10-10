@@ -514,3 +514,238 @@ export async function runSync() {
 
   return results;
 }
+
+// --- people ----------------------------------------------------------------
+
+import * as P from '../people.js';
+
+function pseed() {
+  let s = P.emptyState();
+  const add = (id, name, extra = {}) =>
+    (s = P.applyMutation(s, { op: 'add', contact: { id, name, created: T0, ...extra } }));
+  add('p_dana', 'Dana Levi', { line: 'head baker', tags: ['baking'], roles: ['expert'], knownBy: ['gal'] });
+  add('p_yoni', 'Yoni Ben-David', { line: 'history professor', tags: ['history'], roles: ['champion'], knownBy: ['gur'] });
+  add('p_shira', 'Shira Tal', { roles: ['investor'], knownBy: [], introVia: 'Yoni' });
+  return s;
+}
+const pfind = (s, id) => s.contacts.find((c) => c.id === id);
+
+export function runPeople() {
+  results.length = 0;
+
+  check('a new file has the team, the roles, the stages and no one on it', () => {
+    const s = P.emptyState();
+    eq(s.team.map((p) => p.id), ['gur', 'gal']);
+    eq(s.stage, 'search');
+    ok(s.roles.some((r) => r.id === 'design-partner'));
+    eq(s.contacts, []);
+  });
+
+  check('add normalizes the card: trimmed text, tags as slugs, no repeats', () => {
+    const s = P.applyMutation(P.emptyState(), { op: 'add', contact: { id: 'x', name: '  Dana  ', tags: ['Machine Learning', 'machine_learning', 3], roles: ['Expert'] } });
+    const c = pfind(s, 'x');
+    eq([c.name, c.tags, c.roles, c.every, c.update, c.tie, c.log], ['Dana', ['machine-learning'], ['expert'], 0, false, '', []]);
+  });
+
+  check('add without a name, or with a taken id, changes nothing', () => {
+    const s = pseed();
+    eq(P.applyMutation(s, { op: 'add', contact: { id: 'y', name: '   ' } }), s);
+    eq(P.applyMutation(s, { op: 'add', contact: { id: 'p_dana', name: 'Someone else' } }), s);
+  });
+
+  check('set changes only the fields it names, and only valid values', () => {
+    const s = P.applyMutation(pseed(), { op: 'set', id: 'p_dana', fields: { every: 3, update: true, tie: 'nope', name: '', bogus: 1, org: ' Co-op ' } });
+    const c = pfind(s, 'p_dana');
+    eq([c.every, c.update, c.tie, c.name, c.org, 'bogus' in c], [3, true, '', 'Dana Levi', 'Co-op', false]);
+  });
+
+  check('two people editing different fields of one card both keep their change', () => {
+    let s = pseed();
+    s = P.applyMutation(s, P.setMutation(pfind(s, 'p_dana'), { every: 3 }));
+    s = P.applyMutation(s, P.setMutation(pfind(s, 'p_dana'), { next: 'ask about the pilot' }));
+    const c = pfind(s, 'p_dana');
+    eq([c.every, c.next], [3, 'ask about the pilot']);
+  });
+
+  check('the log keeps newest first, and the same entry twice is one entry', () => {
+    let s = pseed();
+    const dana = pfind(s, 'p_dana');
+    s = P.applyMutation(s, P.logMutation(dana, { date: '2026-09-01', text: 'first', id: 'l1' }));
+    s = P.applyMutation(s, P.logMutation(dana, { date: '2026-10-05', text: 'latest', id: 'l2' }));
+    s = P.applyMutation(s, P.logMutation(dana, { date: '2026-09-20', text: 'middle', id: 'l3' }));
+    s = P.applyMutation(s, P.logMutation(dana, { date: '2026-09-20', text: 'middle', id: 'l3' }));
+    eq(pfind(s, 'p_dana').log.map((e) => e.id), ['l2', 'l3', 'l1']);
+    eq(P.lastContact(pfind(s, 'p_dana')), '2026-10-05');
+  });
+
+  check('a log entry needs a real date', () => {
+    const s = pseed();
+    eq(P.applyMutation(s, { op: 'log', id: 'p_dana', entry: { id: 'l', date: 'yesterday', text: 'x' } }), s);
+  });
+
+  check('unlog removes one entry; delete and restore bring a card back whole', () => {
+    let s = pseed();
+    s = P.applyMutation(s, P.logMutation(pfind(s, 'p_dana'), { date: '2026-09-01', text: 'a', id: 'l1' }));
+    s = P.applyMutation(s, { op: 'unlog', id: 'p_dana', entryId: 'l1' });
+    eq(pfind(s, 'p_dana').log, []);
+    const dana = pfind(s, 'p_dana');
+    s = P.applyMutation(s, { op: 'delete', id: 'p_dana' });
+    ok(!pfind(s, 'p_dana'));
+    s = P.applyMutation(s, { op: 'restore', contact: dana });
+    eq(pfind(s, 'p_dana'), dana);
+  });
+
+  check('months add by the calendar and clamp to the month end', () => {
+    eq(P.addMonths('2026-01-31', 1), '2026-02-28');
+    eq(P.addMonths('2028-01-31', 1), '2028-02-29');
+    eq(P.addMonths('2026-11-15', 3), '2027-02-15');
+    eq(P.addMonths('2026-10-10', 12), '2027-10-10');
+  });
+
+  check('due: never contacted is due now; otherwise the interval after the last contact', () => {
+    let s = pseed();
+    s = P.applyMutation(s, { op: 'set', id: 'p_dana', fields: { every: 1 } });
+    s = P.applyMutation(s, { op: 'set', id: 'p_yoni', fields: { every: 3 } });
+    s = P.applyMutation(s, P.logMutation(pfind(s, 'p_yoni'), { date: '2026-09-01', text: 'call', id: 'l1' }));
+    eq(P.dueDate(pfind(s, 'p_dana')), '');
+    eq(P.dueDate(pfind(s, 'p_yoni')), '2026-12-01');
+    eq(P.dueDate(pfind(s, 'p_shira')), null);
+    eq([P.isDue(pfind(s, 'p_yoni'), '2026-11-30'), P.isDue(pfind(s, 'p_yoni'), '2026-12-01')], [false, true]);
+  });
+
+  check('sections: due first, most overdue first, then everyone else by name, nobody twice', () => {
+    let s = pseed();
+    s = P.applyMutation(s, { op: 'set', id: 'p_shira', fields: { every: 1 } });
+    s = P.applyMutation(s, { op: 'set', id: 'p_yoni', fields: { every: 1 } });
+    s = P.applyMutation(s, P.logMutation(pfind(s, 'p_yoni'), { date: '2026-08-01', text: 'call', id: 'l1' }));
+    const { due, rest } = P.sections(s, P.NO_FILTERS, '2026-10-10');
+    eq(due.map((c) => c.id), ['p_shira', 'p_yoni']);
+    eq(rest.map((c) => c.id), ['p_dana']);
+  });
+
+  check('filters: search, role, tag, tie, who knows them, update, and Now', () => {
+    let s = pseed();
+    const ids = (f) => s.contacts.filter((c) => P.matches(s, c, { ...P.NO_FILTERS, ...f })).map((c) => c.id);
+    eq(ids({ q: 'BAKER' }), ['p_dana']);
+    eq(ids({ q: 'histor' }), ['p_yoni']);
+    eq(ids({ role: 'investor' }), ['p_shira']);
+    eq(ids({ tag: 'baking' }), ['p_dana']);
+    eq(ids({ knownBy: 'gur' }), ['p_yoni']);
+    eq(ids({ knownBy: 'nobody' }), ['p_shira']);
+    s = P.applyMutation(s, { op: 'set', id: 'p_shira', fields: { update: true, tie: 'unmet' } });
+    eq(ids({ update: true }), ['p_shira']);
+    eq(ids({ tie: 'unmet' }), ['p_shira']);
+    eq(ids({ now: true }), ['p_dana', 'p_yoni', 'p_shira']);
+    s = P.applyMutation(s, { op: 'setStage', stage: 'fill' });
+    eq(ids({ now: true }), ['p_yoni', 'p_shira']);
+  });
+
+  check('setStage takes only a stage the file knows', () => {
+    const s = pseed();
+    eq(P.applyMutation(s, { op: 'setStage', stage: 'party' }), s);
+    eq(P.applyMutation(s, { op: 'setStage', stage: 'commit' }).stage, 'commit');
+  });
+
+  check('quick add: name, line, #tags, +roles and @people anywhere', () => {
+    const s = P.emptyState();
+    eq(P.parseQuickAdd('Dana Levi, head baker at a chain #baking +expert @gal', s),
+      { name: 'Dana Levi', line: 'head baker at a chain', tags: ['baking'], roles: ['expert'], knownBy: ['gal'] });
+    eq(P.parseQuickAdd('@gur Shira Tal - investor at a fund +investor', s),
+      { name: 'Shira Tal', line: 'investor at a fund', tags: [], roles: ['investor'], knownBy: ['gur'] });
+    eq(P.parseQuickAdd('Avi #retail, shop manager', s).name, 'Avi');
+    eq(P.parseQuickAdd('Avi #retail, shop manager', s).line, 'shop manager');
+  });
+
+  check('quick add keeps a +role or @name it does not know as text', () => {
+    const p = P.parseQuickAdd('Noa, runs a C++ shop +wizard @yossi', P.emptyState());
+    eq([p.name, p.line, p.roles, p.knownBy], ['Noa', 'runs a C++ shop +wizard @yossi', [], []]);
+  });
+
+  check('paste many: one person per line, blank lines skipped', () => {
+    const list = P.parseMany('Dana, baking\n\n  \nYoni, history\r\nנועה כהן, אדריכלות', P.emptyState());
+    eq(list.map((p) => p.name), ['Dana', 'Yoni', 'נועה כהן']);
+  });
+
+  check('serialize keeps a canonical order and fields it does not know', () => {
+    const text = JSON.stringify({
+      contacts: [{ notes: 'n', name: 'Dana', id: 'p1', phone: '050', log: [{ text: 't', date: '2026-01-01', id: 'l', mood: 'good' }] }],
+      groups: ['a'], stage: 'search',
+    });
+    const s = P.deserialize(text);
+    eq(Object.keys(s), ['version', 'team', 'roles', 'stages', 'stage', 'contacts', 'groups']);
+    eq(Object.keys(s.contacts[0]).slice(-2), ['created', 'phone']);
+    eq(s.contacts[0].log[0].mood, 'good');
+    eq(P.serialize(P.deserialize(P.serialize(s))), P.serialize(s));
+  });
+
+  check('commit messages say who', () => {
+    const s = pseed();
+    eq(P.commitMessage([P.addMutation({ name: 'Avi Mor' }, { now: T0, id: 'p_a' })]), 'people: add Avi Mor');
+    eq(P.commitMessage([P.logMutation(pfind(s, 'p_dana'), { date: '2026-10-01', id: 'l' })]), 'people: log Dana Levi');
+    eq(P.commitMessage([{ op: 'setStage', stage: 'commit' }]), 'people: stage commit');
+    eq(P.commitMessage([{ op: 'delete', id: 'a' }, { op: 'delete', id: 'b' }]), 'people: 2 changes');
+  });
+
+  return results;
+}
+
+export async function runPeopleSync() {
+  results.length = 0;
+
+  // The same stand-in as for tasks, holding people.json instead.
+  function premote(initial) {
+    const r = { text: P.serialize(initial), sha: 'S0', n: 0, puts: 0 };
+    r.fetch = async (url, init) => {
+      if (!/\/contents\/people\.json/.test(url)) return mockRes(404, {});
+      if (!init || !init.method || init.method === 'GET') return mockRes(200, { sha: r.sha, content: toBase64(r.text) });
+      r.puts++;
+      const body = JSON.parse(init.body);
+      if ((body.sha || null) !== r.sha) return mockRes(409, {});
+      r.text = fromBase64(body.content);
+      r.sha = `S${++r.n}`;
+      r.message = body.message;
+      return mockRes(200, { content: { sha: r.sha } });
+    };
+    r.state = () => P.deserialize(r.text);
+    r.external = (m) => { r.text = P.serialize(P.applyMutation(P.deserialize(r.text), m)); r.sha = `S${++r.n}`; };
+    return r;
+  }
+  const store = (remote) => new GitHubStore({ owner: 'o', repo: 'r', token: 't', path: 'people.json', codec: P.codec, fetchImpl: remote.fetch, retryDelays: NO_WAIT });
+
+  await checkAsync('the store reads and writes people.json with the people rules', async () => {
+    const remote = premote(pseed());
+    const st = store(remote);
+    const s = await st.load();
+    eq(s.contacts.length, 3);
+    await st.save(P.applyMutation(s, { op: 'delete', id: 'p_shira' }), [{ op: 'delete', id: 'p_shira', name: 'Shira Tal' }]);
+    eq(remote.message, 'people: remove Shira Tal');
+    eq(remote.state().contacts.map((c) => c.id), ['p_dana', 'p_yoni']);
+  });
+
+  await checkAsync('both editing one card at once: the conflict replays and keeps both fields', async () => {
+    const remote = premote(pseed());
+    const st = store(remote);
+    const s = await st.load();
+    remote.external({ op: 'set', id: 'p_dana', fields: { next: 'send the deck' } }); // the other phone
+    const mine = { op: 'set', id: 'p_dana', name: 'Dana Levi', fields: { every: 3 } };
+    await st.save(P.applyMutation(s, mine), [mine]);
+    eq(remote.puts, 2, 'one conflict, one retry');
+    const c = remote.state().contacts.find((x) => x.id === 'p_dana');
+    eq([c.every, c.next], [3, 'send the deck']);
+  });
+
+  await checkAsync('the people queue is kept apart from the task queue', async () => {
+    const storage = new MemoryStorage();
+    const remote = premote(pseed());
+    const sync = new Sync({ store: store(remote), storage, codec: P.codec, keys: { mirror: 'people.mirror', queue: 'people.queue' }, quietMs: 60000 });
+    await sync.start();
+    sync.apply(P.addMutation({ name: 'Avi Mor' }, { now: T0, id: 'p_avi' }));
+    eq(JSON.parse(storage.getItem('people.queue')).length, 1);
+    eq(storage.getItem('tasks.queue'), null);
+    ok(P.deserialize(storage.getItem('people.mirror')).contacts.some((c) => c.id === 'p_avi'));
+    await sync.flush();
+    ok(remote.state().contacts.some((c) => c.id === 'p_avi'));
+  });
+
+  return results;
+}
