@@ -77,6 +77,7 @@ Thirty days before the token expires, the app adds a flagged task to renew it, o
 - **All | Mine** at the top, and the state chips under it, choose what you see. Both are remembered on that device.
 - **Reordering:** long-press a row, drag, then tap **Done**.
 - **Offline:** changes wait on the phone and sync when you're back online.
+- **In a computer browser:** the list sits in a centred column. ▲ and ◷ show when you hover a row, the ⠿ handle on its left drags it, and **N** jumps to the add box. Hover the note icon to see a note's first line.
 
 ## From a computer, or for an agent
 

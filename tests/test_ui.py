@@ -616,3 +616,8 @@ def test_tap_targets_are_thumb_sized(page):
 def test_the_add_bar_leaves_room_to_type(page):
     width = page.locator("#add-text").bounding_box()["width"]
     assert width >= 110, f"only {width:.0f}px left for typing"
+
+
+def test_phones_have_no_drag_handle(page):
+    add(page, "a task")
+    assert not row(page, "a task").locator(".grip").is_visible()

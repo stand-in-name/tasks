@@ -96,6 +96,7 @@ let sync = new Sync({ store: makeStore(), storage: LS });
 let psync = newPeopleSync();
 let reordering = false;
 let dragging = null;
+let gripDrag = false;
 let undoTimer = null;
 
 const hasPeople = () => (sync.state.people || []).length > 0;
@@ -211,19 +212,27 @@ function taskRow(task, now, ownerShown) {
   text.type = 'button';
   text.className = 'task-text';
   text.dir = 'auto';
-  text.append(document.createTextNode(task.text));
+  // The words sit in their own span so the desktop layout can push the badges
+  // into a column on the right; on a phone it renders exactly as before.
+  const label = document.createElement('span');
+  label.className = 'label';
+  label.textContent = task.text;
+  text.append(label);
   // In the Mine view every badge would say the same name, so they drop out.
   if (task.owner && !ownerShown) {
     const o = document.createElement('span');
     o.className = 'owner' + (task.owner === me() ? ' owner-me' : '');
+    o.dataset.owner = task.owner;
     o.textContent = ownerLabel(sync.state, task.owner);
     text.appendChild(o);
   }
   if (task.note) {
     const n = document.createElement('span');
     n.className = 'has-note';
-    n.textContent = '¶';
-    n.title = 'has a note';
+    // Drawn as an icon in CSS. Hovering shows the start of the note.
+    const first = task.note.trim().split('\n')[0];
+    n.title = first.length > 120 ? first.slice(0, 119) + '…' : first;
+    n.setAttribute('aria-label', 'has a note');
     text.appendChild(n);
   }
   if (isStale(task, now)) {
@@ -242,7 +251,22 @@ function taskRow(task, now, ownerShown) {
   const wait = markButton('mark-wait', '◷', 'Mark as waiting', () =>
     sync.apply(toggleStateMutation(task, 'waiting')) && render());
 
-  li.append(done, text, flag, wait);
+  // Desktop only (hidden on phones, where a long-press arms reorder): a handle
+  // that drags straight away, with no reorder mode to enter and leave.
+  const grip = document.createElement('span');
+  grip.className = 'grip';
+  grip.title = 'Drag to move';
+  grip.setAttribute('aria-hidden', 'true');
+  grip.addEventListener('pointerdown', (e) => {
+    if (reordering || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation(); // keep the row's long-press timer out of it
+    gripDrag = true;
+    document.body.classList.add('grip-dragging');
+    beginDrag(e, li);
+  });
+
+  li.append(grip, done, text, flag, wait);
   attachLongPress(li);
   return li;
 }
@@ -906,7 +930,31 @@ function endDrag() {
   const all = sync.state.tasks.filter((t) => t.topic === topic && t.id !== id).map((t) => t.id);
   const index = prev ? all.indexOf(prev.dataset.id) + 1 : 0;
   dragging = null;
+  if (gripDrag) {
+    gripDrag = false;
+    document.body.classList.remove('grip-dragging');
+  }
   sync.apply({ op: 'move', id, topic, index });
+}
+
+// --- keyboard (desktop) ----------------------------------------------------
+// N jumps to the add box of whichever list is showing.
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'n' && e.key !== 'N') return;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+  const t = e.target;
+  if (t.closest && t.closest('input, textarea, select, [contenteditable], dialog')) return;
+  if (document.querySelector('dialog[open]')) return;
+  const box = $(view.list === 'people' ? 'padd-text' : 'add-text');
+  if (!box || box.offsetParent === null) return;
+  e.preventDefault();
+  box.focus();
+});
+
+if (window.matchMedia && matchMedia('(hover: hover) and (pointer: fine)').matches) {
+  $('add-text').placeholder = 'Add a task  (N)';
+  $('padd-text').placeholder += '  (N)';
 }
 
 // --- sync status -----------------------------------------------------------
