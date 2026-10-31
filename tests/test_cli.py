@@ -138,20 +138,32 @@ def test_list_groups_by_topic_and_shows_owners(boardfile):
     assert out.index("SEARCH") < out.index("NETWORK")
     assert "map the field  [Gur]" in out
     assert "check the grant rules ¶  [Gal]" in out
+    assert "call Dana  [Both]" in out
+
+
+def test_list_says_everyone_once_the_board_has_more_than_two_people(tmp_path):
+    f = tmp_path / "tasks.json"
+    f.write_text(T.serialize(board(people=[*T.empty_state()["people"], {"id": "dana", "name": "Dana"}])), encoding="utf-8")
+    assert "call Dana  [Everyone]" in run("--file", str(f), "list").stdout
 
 
 def test_list_filters_by_owner_state_and_topic(boardfile):
     f = str(boardfile)
-    assert "map the field" in run("--file", f, "list", "--mine", env={"TASKS_ME": "gur"}).stdout
-    assert "grant" not in run("--file", f, "list", "--mine", env={"TASKS_ME": "gur"}).stdout
-    assert "call Dana" in run("--file", f, "list", "--owner", "none").stdout
+    mine = run("--file", f, "list", "--mine", env={"TASKS_ME": "gur"}).stdout
+    assert "map the field" in mine and "call Dana" in mine and "grant" not in mine
+    gal = run("--file", f, "list", "--owner", "gal").stdout
+    assert "grant" in gal and "call Dana" in gal and "map the field" not in gal
+    for word in ("both", "Both", "none", "nobody"):
+        out = run("--file", f, "list", "--owner", word).stdout
+        assert "call Dana" in out and "map the field" not in out and "grant" not in out, word
     assert "grant" not in run("--file", f, "list", "--state", "flagged").stdout
     assert "Dana" in run("--file", f, "list", "--topic", "Network").stdout
 
 
 def test_list_json_is_the_raw_tasks(boardfile):
     tasks = json.loads(run("--file", str(boardfile), "list", "--json", "--owner", "gal").stdout)
-    assert [t["id"] for t in tasks] == ["t_aab222"]
+    assert [t["id"] for t in tasks] == ["t_aab222", "t_bbb333"]
+    assert tasks[1]["owner"] is None  # the file keeps no owner as null
 
 
 def test_add_defaults_to_me_and_lands_on_top_of_its_topic(boardfile):
@@ -168,7 +180,7 @@ def test_add_shortcuts_and_flags(boardfile):
     t = load(boardfile)["tasks"][[x["text"] for x in load(boardfile)["tasks"]].index("ping Dana")]
     assert (t["owner"], t["state"], t["topic"]) == ("gal", "flagged", "network")
     # Flags beat the shortcuts in the text.
-    run("--file", f, "add", "@gal x", "--owner", "none", "--wait")
+    run("--file", f, "add", "@gal x", "--owner", "both", "--wait")
     t = next(x for x in load(boardfile)["tasks"] if x["text"] == "x")
     assert (t["owner"], t["state"]) == (None, "waiting")
 
@@ -186,9 +198,11 @@ def test_state_owner_text_note_and_move_commands(boardfile):
         "flagged", "gal", "call Dana back", "she asked about dates", "search")
     assert [x["id"] for x in s["tasks"] if x["topic"] == "search"] == ["t_aaa111", "t_bbb333", "t_aab222"]
     run("--file", f, "normal", "t_bbb")
-    run("--file", f, "own", "t_bbb", "none")
+    out = run("--file", f, "own", "t_bbb", "both").stdout
+    assert "→ both" in out
     t = next(x for x in load(boardfile)["tasks"] if x["id"] == "t_bbb333")
     assert (t["state"], t["owner"]) == ("normal", None)
+    assert "owner: Both" in run("--file", f, "show", "t_bbb").stdout
 
 
 def test_done_removes_the_task(boardfile):

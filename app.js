@@ -3,7 +3,7 @@
 // lists share the engine and the settings, but not a file.
 
 import {
-  grouped, counts, isStale, daysOld, ownerLabel, ownedBy,
+  grouped, counts, isStale, daysOld, ownerLabel, sharedLabel, ownedBy,
   addMutation, toggleStateMutation, makeId, parseQuickAdd, effectiveTopic, resolveTopic,
 } from './logic.js';
 import * as P from './people.js';
@@ -101,6 +101,9 @@ let undoTimer = null;
 
 const hasPeople = () => (sync.state.people || []).length > 0;
 const ownerFilter = () => (view.who === 'mine' && me() ? me() : null);
+// Who a task with no owner belongs to, in a sentence: "both of us", or
+// "everyone" once the board has more than two people.
+const sharedWords = () => (sharedLabel(sync.state) === 'Both' ? 'both of us' : 'everyone');
 
 // --- rendering -------------------------------------------------------------
 
@@ -157,7 +160,7 @@ function renderTasks() {
   }
 
   fillTopicSelect($('add-topic'), state, $('add-topic').value || 'inbox');
-  fillOwnerSelect($('add-owner'), state, addOwner ?? me(), '—');
+  fillOwnerSelect($('add-owner'), state, addOwner ?? me(), sharedLabel(state));
   $('add-owner').hidden = !hasPeople();
 }
 
@@ -218,8 +221,15 @@ function taskRow(task, now, ownerShown) {
   label.className = 'label';
   label.textContent = task.text;
   text.append(label);
-  // In the Mine view every badge would say the same name, so they drop out.
-  if (task.owner && !ownerShown) {
+  // A task with no owner belongs to all of us, and says so, in Mine too. The
+  // other badges drop out in Mine, where they would all say the same name.
+  if (!task.owner) {
+    const o = document.createElement('span');
+    o.className = 'owner owner-both';
+    o.dataset.owner = '';
+    o.textContent = sharedLabel(sync.state);
+    text.appendChild(o);
+  } else if (!ownerShown) {
     const o = document.createElement('span');
     o.className = 'owner' + (task.owner === me() ? ' owner-me' : '');
     o.dataset.owner = task.owner;
@@ -362,7 +372,7 @@ $('add').addEventListener('submit', (e) => {
   // A task added for the other person in the Mine view, or into a hidden
   // state, would otherwise seem to vanish on the spot.
   const t = m.task;
-  if (!ownedBy(t, ownerFilter())) showNote(`Added for ${ownerLabel(sync.state, t.owner) || 'nobody'}`);
+  if (!ownedBy(t, ownerFilter())) showNote(`Added for ${ownerLabel(sync.state, t.owner) || sharedWords()}`);
   else if (!view.filters[t.state]) showNote('Added, but hidden by the filters above');
 });
 
@@ -643,7 +653,7 @@ function openPerson(id) {
   $('pd-file').value = c.file;
   $('pd-log-date').value = today();
   $('pd-log-text').value = '';
-  fillOwnerSelect($('pd-task-owner'), sync.state, me(), 'Nobody');
+  fillOwnerSelect($('pd-task-owner'), sync.state, me(), sharedLabel(sync.state));
   $('pd-task-add').textContent = `Add “Talk to ${c.name}” to the board`;
   $('pd-task-msg').textContent = '';
   renderPersonExtras();
@@ -708,7 +718,7 @@ $('pd-task-add').addEventListener('click', () => {
     now: new Date().toISOString(),
     id: makeId(),
   }));
-  $('pd-task-msg').textContent = `Added to the board for ${ownerLabel(sync.state, owner) || 'nobody'}.`;
+  $('pd-task-msg').textContent = `Added to the board for ${ownerLabel(sync.state, owner) || sharedWords()}.`;
 });
 
 $('pdetail').addEventListener('close', () => {
@@ -760,7 +770,7 @@ function openDetail(task) {
   $('d-text').value = task.text;
   $('d-note').value = task.note || '';
   fillTopicSelect($('d-topic'), sync.state, effectiveTopic(sync.state, task));
-  fillOwnerSelect($('d-owner'), sync.state, task.owner || '', 'Nobody');
+  fillOwnerSelect($('d-owner'), sync.state, task.owner || '', sharedLabel(sync.state));
   $('d-owner-field').hidden = !hasPeople() && !task.owner;
   $('d-age').textContent = task.created
     ? `Added ${new Date(task.created).toLocaleDateString()} — ${daysOld(task, new Date().toISOString())} days ago`

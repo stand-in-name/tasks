@@ -224,9 +224,15 @@ def test_a_person_becomes_a_task_on_the_board(page):
     page.select_option("#pd-task-owner", "gal")
     page.click("#pd-task-add")
     assert "Added to the board for Gal" in page.inner_text("#pd-task-msg")
-    press(page, "pdetail", "#pdetail button[value=cancel]")
     task = page.evaluate("() => window.__tasks.sync.state.tasks[0]")
     assert (task["text"], task["topic"], task["owner"]) == ("Talk to Dana Levi", "network", "gal")
+    # The no-owner choice says Both, and so does the message.
+    assert page.locator("#pd-task-owner option[value='']").inner_text() == "Both"
+    page.select_option("#pd-task-owner", "")
+    page.click("#pd-task-add")
+    assert "Added to the board for both of us." in page.inner_text("#pd-task-msg")
+    assert page.evaluate("() => window.__tasks.sync.state.tasks[0].owner") is None
+    press(page, "pdetail", "#pdetail button[value=cancel]")
     page.click("#list-tasks")
     assert page.locator(".task-text").first.inner_text().startswith("Talk to Dana Levi")
 

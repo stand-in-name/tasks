@@ -521,6 +521,9 @@ select {
   .task-text .owner-me, .pmeta .owner-me {
     background: color-mix(in srgb, var(--accent) 13%, var(--bg)); color: var(--accent);
   }
+  .task-text .owner-both {
+    background: color-mix(in srgb, var(--muted) 12%, var(--bg)); color: var(--muted);
+  }
 
   /* flag and wait: shown on hover, and always when set */
   .mark {

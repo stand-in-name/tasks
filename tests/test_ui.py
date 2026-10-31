@@ -115,11 +115,13 @@ def test_new_tasks_are_mine_by_default(page):
     assert row(page, "draft the weekly").locator(".owner-me").count() == 1
 
 
-def test_the_add_bar_can_give_a_task_to_the_other_person_or_to_nobody(page):
+def test_the_add_bar_can_give_a_task_to_the_other_person_or_to_both(page):
+    # The picker's no-owner choice says Both: a task with no owner is ours.
+    assert page.locator("#add-owner option[value='']").inner_text() == "Both"
     add(page, "check the grant rules", "search", owner="gal")
     add(page, "decide together", "search", owner="")
     assert row(page, "check the grant").locator(".owner").inner_text() == "Gal"
-    assert row(page, "decide together").locator(".owner").count() == 0
+    assert row(page, "decide together").locator(".owner-both").inner_text() == "Both"
     # The picker goes back to "me" after each task, so a handover can't
     # quietly take the next task with it.
     assert page.input_value("#add-owner") == "gur"
@@ -135,16 +137,27 @@ def test_at_name_in_the_text_assigns_it(page):
     assert topics_shown(page) == ["search"]
 
 
-def test_mine_shows_only_my_tasks_and_drops_the_badges(page):
+def test_mine_shows_my_tasks_and_both_and_keeps_only_the_both_badge(page):
     add(page, "mine one", "search")
     add(page, "theirs", "search", owner="gal")
-    add(page, "nobody's", "network", owner="")
+    add(page, "ours", "network", owner="")
     page.click("#who-mine")
-    assert texts(page) == ["mine one"]
-    assert badges(page) == []
-    assert page.locator("#c-normal").inner_text() == "1"
+    assert sorted(texts(page)) == ["mine one", "ours"]
+    assert badges(page) == ["Both"]
+    assert page.locator("#c-normal").inner_text() == "2"
     page.click("#who-all")
-    assert sorted(texts(page)) == ["mine one", "nobody's", "theirs"]
+    assert sorted(texts(page)) == ["mine one", "ours", "theirs"]
+    assert sorted(badges(page)) == ["Both", "Gal", "Gur"]
+
+
+def test_a_board_of_more_than_two_says_everyone(pages):
+    board = {"version": 1, "topics": [{"id": "inbox", "title": "Inbox"}, {"id": "search", "title": "Search"}],
+             "people": [{"id": "gur", "name": "Gur"}, {"id": "gal", "name": "Gal"}, {"id": "dana", "name": "Dana"}],
+             "tasks": []}
+    page = pages.open(storage={"tasks.me": "gur", "tasks.state": json.dumps(board)})
+    assert page.locator("#add-owner option[value='']").inner_text() == "Everyone"
+    add(page, "all hands", "search", owner="")
+    assert badges(page) == ["Everyone"]
 
 
 def test_mine_is_remembered_on_this_device(page):
@@ -176,17 +189,18 @@ def test_mine_before_saying_who_you_are_asks_first(pages):
     assert page.get_attribute("#who-mine", "aria-pressed") == "true"
 
 
-def test_detail_sheet_hands_a_task_over_and_back_to_nobody(page):
+def test_detail_sheet_hands_a_task_over_and_back_to_both(page):
     add(page, "hand me over", "search")
     page.click(".task-text")
     assert page.input_value("#d-owner") == "gur"
+    assert page.locator("#d-owner option[value='']").inner_text() == "Both"
     page.select_option("#d-owner", "gal")
     press(page, "detail", "#d-save")
     assert badges(page) == ["Gal"]
     page.click(".task-text")
     page.select_option("#d-owner", "")
     press(page, "detail", "#d-save")
-    assert badges(page) == []
+    assert badges(page) == ["Both"]
 
 
 def test_owners_survive_a_reload(page):

@@ -60,6 +60,12 @@ export function ownerLabel(state, id) {
   return p ? p.name : id;
 }
 
+// Every task belongs to someone: a task with no owner belongs to all of us.
+// "Both" while the board has two people, "Everyone" once it has more.
+export function sharedLabel(state) {
+  return (state.people || []).length > 2 ? 'Everyone' : 'Both';
+}
+
 function indicesOfTopic(tasks, topicId) {
   const out = [];
   tasks.forEach((t, i) => {
@@ -98,7 +104,8 @@ export function applyMutation(state, m) {
       return mapTask(state, m.id, (t) => ({ ...t, state: m.state }));
     }
     case 'setOwner': {
-      // One owner or none. A task owned by two people is owned by no one.
+      // One owner, or none, which means the task belongs to all of us. Never a
+      // list: a task for some of us is handed to one of them.
       if (m.owner !== null && typeof m.owner !== 'string') return state;
       return mapTask(state, m.id, (t) => ({ ...t, owner: m.owner || null }));
     }
@@ -154,9 +161,10 @@ export function toggleStateMutation(task, target) {
 
 export const ALL_VISIBLE = { flagged: true, normal: true, waiting: true };
 
-// `owner` null means everyone's tasks; otherwise only that person's.
+// `owner` null means everyone's tasks; otherwise that person's, plus the tasks
+// with no owner, which belong to all of us.
 export function ownedBy(task, owner) {
-  return !owner || task.owner === owner;
+  return !owner || !task.owner || task.owner === owner;
 }
 
 export function isStale(task, now, days = STALE_DAYS) {

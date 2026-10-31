@@ -148,7 +148,7 @@ export function commitMessage(mutations) {
   if (mutations.length === 1) {
     const m = mutations[0];
     const what = m.task ? m.task.text : m.text || m.id;
-    const who = m.op === 'setOwner' ? ` → ${m.owner || 'nobody'}` : '';
+    const who = m.op === 'setOwner' ? ` → ${m.owner || 'both'}` : '';
     return `tasks: ${LABELS[m.op] || m.op} ${String(what).slice(0, 60)}${who}`;
   }
   return `tasks: ${mutations.length} changes`;

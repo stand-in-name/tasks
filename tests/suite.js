@@ -69,9 +69,9 @@ export function runLogic() {
     eq(ids(s, 'admin'), ['z']);
   });
 
-  check('add records the owner, and no owner as null', () => {
+  check('add records the owner, and no owner (both of us) as null', () => {
     let s = L.applyMutation(seed(), L.addMutation({ text: 'mine', owner: 'gal', now: T0, id: 'z1' }));
-    s = L.applyMutation(s, L.addMutation({ text: 'nobody', now: T0, id: 'z2' }));
+    s = L.applyMutation(s, L.addMutation({ text: 'both', now: T0, id: 'z2' }));
     eq(find(s, 'z1').owner, 'gal');
     eq(find(s, 'z2').owner, null);
   });
@@ -90,7 +90,7 @@ export function runLogic() {
     eq(find(s2, 'c').state, 'flagged');
   });
 
-  check('setOwner hands a task over, and null clears it', () => {
+  check('setOwner hands a task over, and null gives it back to both', () => {
     let s = L.applyMutation(seed(), { op: 'setOwner', id: 'a', owner: 'gal' });
     eq(find(s, 'a').owner, 'gal');
     s = L.applyMutation(s, { op: 'setOwner', id: 'a', owner: null });
@@ -140,9 +140,17 @@ export function runLogic() {
     eq(g[0].tasks.map((t) => t.id), ['b']);
   });
 
-  check('grouped with an owner shows only that person\'s tasks', () => {
+  check('grouped with an owner shows that person\'s tasks and the ones with no owner', () => {
     const g = L.grouped(seed(), L.ALL_VISIBLE, 'gur');
-    eq(g.map((x) => [x.topic.id, x.tasks.map((t) => t.id)]), [['search', ['d']], ['network', ['a']]]);
+    eq(g.map((x) => [x.topic.id, x.tasks.map((t) => t.id)]), [['search', ['d']], ['network', ['a', 'c']]]);
+  });
+
+  check('ownedBy: a task with no owner belongs to everyone, an owned one only to its owner', () => {
+    ok(L.ownedBy({ owner: null }, 'gur'));
+    ok(L.ownedBy({ owner: null }, 'gal'));
+    ok(L.ownedBy({ owner: 'gur' }, 'gur'));
+    ok(!L.ownedBy({ owner: 'gal' }, 'gur'));
+    ok(L.ownedBy({ owner: 'gal' }, null), 'no filter shows everything');
   });
 
   check('grouped follows the topic order in the file, not insertion order', () => {
@@ -160,8 +168,8 @@ export function runLogic() {
 
   check('counts report per state, for everyone or for one person', () => {
     eq(L.counts(seed()), { flagged: 1, normal: 2, waiting: 1, total: 4 });
-    eq(L.counts(seed(), 'gur'), { flagged: 0, normal: 2, waiting: 0, total: 2 });
-    eq(L.counts(seed(), 'gal'), { flagged: 1, normal: 0, waiting: 0, total: 1 });
+    eq(L.counts(seed(), 'gur'), { flagged: 0, normal: 2, waiting: 1, total: 3 });
+    eq(L.counts(seed(), 'gal'), { flagged: 1, normal: 0, waiting: 1, total: 2 });
   });
 
   check('stale marker is off at 29 days and on at 30', () => {
@@ -175,11 +183,17 @@ export function runLogic() {
     eq(L.isStale({ created: null }, '2027-01-01T00:00:00.000Z'), false);
   });
 
-  check('ownerLabel shows the name, falls back to the id, and is empty for nobody', () => {
+  check('ownerLabel shows the name, falls back to the id, and is empty for no owner', () => {
     const s = seed();
     eq(L.ownerLabel(s, 'gal'), 'Gal');
     eq(L.ownerLabel(s, 'ex-member'), 'ex-member');
     eq(L.ownerLabel(s, null), '');
+  });
+
+  check('sharedLabel says Both for two people and Everyone for more', () => {
+    eq(L.sharedLabel(seed()), 'Both');
+    eq(L.sharedLabel({ people: [] }), 'Both');
+    eq(L.sharedLabel(L.emptyState(L.DEFAULT_TOPICS, [...L.DEFAULT_PEOPLE, { id: 'dana', name: 'Dana' }])), 'Everyone');
   });
 
   // quick add
@@ -425,6 +439,7 @@ export async function runStore() {
   check('commit messages describe a single change, including handovers', () => {
     ok(/call the bank/.test(commitMessage([L.addMutation({ text: 'call the bank', now: T0, id: 'q' })])));
     eq(commitMessage([{ op: 'setOwner', id: 't_1', owner: 'gal' }]), 'tasks: own t_1 → gal');
+    eq(commitMessage([{ op: 'setOwner', id: 't_1', owner: null }]), 'tasks: own t_1 → both');
     eq(commitMessage([{ op: 'delete', id: 'a' }, { op: 'delete', id: 'b' }]), 'tasks: 2 changes');
   });
 

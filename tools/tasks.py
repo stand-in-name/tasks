@@ -19,12 +19,18 @@ TASKS_ME names you (gur or gal): it is the default owner for `add` and what
 `--mine` means. Flags win over the shortcuts in the text, which win over
 TASKS_ME.
 
+Every task belongs to someone. A task with no owner belongs to both of you:
+`list` shows it as [Both] ([Everyone] once the board has more than two
+people), and `--mine` and `--owner <person>` include it. Give a task to both
+with the owner 'both'.
+
 Examples:
   tasks.py list
   tasks.py list --mine --state flagged
   tasks.py add "call Dana about the workshop" --topic network --flag
   tasks.py add "@gal !search: read the market report"
   tasks.py own t_ab12cd34ef gal
+  tasks.py own t_ab12cd34ef both
   tasks.py done t_ab12
 """
 
@@ -331,7 +337,7 @@ def commit_message(mutations):
     if len(mutations) == 1:
         m = mutations[0]
         what = m["task"]["text"] if "task" in m else m.get("text") or m.get("id")
-        who = f" → {m.get('owner') or 'nobody'}" if m.get("op") == "setOwner" else ""
+        who = f" → {m.get('owner') or 'both'}" if m.get("op") == "setOwner" else ""
         return f"tasks: {LABELS.get(m['op'], m['op'])} {str(what)[:60]}{who}"
     return f"tasks: {len(mutations)} changes"
 
@@ -593,10 +599,14 @@ def me():
     return os.environ.get("TASKS_ME", "").strip() or None
 
 
+SHARED = ("both", "everyone", "none", "nobody", "-")
+
+
 def resolve_owner(state, name):
-    """'me', 'none'/'nobody', or a person's id or name."""
+    """'me', 'both' (no owner: the task belongs to both of you), or a person's
+    id or name. 'everyone', 'none', 'nobody' and '-' also mean both."""
     low = str(name).strip().lower()
-    if low in ("none", "nobody", "-"):
+    if low in SHARED:
         return None
     if low == "me":
         if not me():
@@ -621,9 +631,21 @@ def find_task(state, ref):
     raise BoardError(f"{ref} matches {len(hits)} tasks; use more of the id")
 
 
+def shared_label(state):
+    """What a task with no owner shows: it belongs to all of you. Mirrors
+    sharedLabel in logic.js."""
+    return "Everyone" if len(state.get("people") or []) > 2 else "Both"
+
+
+def owned_by(task, owner_id):
+    """Mirrors ownedBy in logic.js: a person's tasks include the ones with no
+    owner, which belong to all of you."""
+    return not task["owner"] or task["owner"] == owner_id
+
+
 def owner_label(state, owner_id):
     if not owner_id:
-        return ""
+        return shared_label(state)
     for p in state.get("people") or []:
         if p["id"] == owner_id:
             return p["name"]
@@ -641,9 +663,8 @@ def print_tasks(state, tasks):
             continue
         print(topic["title"].upper())
         for t in rows:
-            owner = owner_label(state, t["owner"])
             note = " ¶" if t["note"] else ""
-            print(f"  {t['id']}  {GLYPH[t['state']]}  {t['text']}{note}" + (f"  [{owner}]" if owner else ""))
+            print(f"  {t['id']}  {GLYPH[t['state']]}  {t['text']}{note}  [{owner_label(state, t['owner'])}]")
 
 
 def cmd_list(args, backend):
@@ -659,7 +680,11 @@ def cmd_list(args, backend):
     owner = "me" if args.mine else args.owner
     if owner:
         wanted = resolve_owner(state, owner)
-        tasks = [t for t in tasks if t["owner"] == wanted]
+        # 'both' lists only the shared tasks; a person gets theirs plus those.
+        if wanted is None:
+            tasks = [t for t in tasks if not t["owner"]]
+        else:
+            tasks = [t for t in tasks if owned_by(t, wanted)]
     if args.json:
         print(json.dumps(tasks, indent=2, ensure_ascii=False))
     elif tasks:
@@ -729,7 +754,7 @@ def cmd_show(args, backend):
         print(json.dumps(t, indent=2, ensure_ascii=False))
         return
     print(t["text"])
-    print(f"  id: {t['id']}   topic: {t['topic']}   state: {t['state']}   owner: {owner_label(state, t['owner']) or 'nobody'}")
+    print(f"  id: {t['id']}   topic: {t['topic']}   state: {t['state']}   owner: {owner_label(state, t['owner'])}")
     print(f"  added: {t['created'] or 'unknown'}")
     if t["note"]:
         print("\n" + t["note"])
@@ -762,15 +787,15 @@ def build_parser():
     s = sub.add_parser("list", help="show tasks")
     s.add_argument("--topic")
     s.add_argument("--state", choices=STATES)
-    s.add_argument("--owner", help="a person, 'me' or 'none'")
-    s.add_argument("--mine", action="store_true", help="only TASKS_ME's tasks")
+    s.add_argument("--owner", help="a person or 'me' (their tasks plus both's), or 'both' (only those)")
+    s.add_argument("--mine", action="store_true", help="TASKS_ME's tasks, plus both's")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_list)
 
     s = sub.add_parser("add", help="add a task (shortcuts: !, topic:, @name)")
     s.add_argument("text")
     s.add_argument("--topic")
-    s.add_argument("--owner", help="a person, 'me' or 'none' (default: TASKS_ME)")
+    s.add_argument("--owner", help="a person, 'me' or 'both' (default: TASKS_ME)")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--flag", action="store_true")
     g.add_argument("--wait", action="store_true")
@@ -785,7 +810,7 @@ def build_parser():
 
     s = sub.add_parser("own", help="set the owner")
     s.add_argument("id")
-    s.add_argument("person", help="a person, 'me' or 'none'")
+    s.add_argument("person", help="a person, 'me' or 'both'")
     s.set_defaults(fn=cmd_own)
 
     s = sub.add_parser("note", help="replace the note")

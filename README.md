@@ -21,7 +21,7 @@ The code and the tasks sit in separate repos because the token is stored in your
 | `text` | One line. |
 | `topic` | The section it sits under. A task whose topic no longer exists shows under Inbox. |
 | `state` | `normal`, `flagged` or `waiting`; one at a time. |
-| `owner` | One person or nobody, never both: a task two people own is owned by no one. |
+| `owner` | One person, or none, which means both of us: every task belongs to someone. A task with no owner shows **Both** (**Everyone** once the board has more than two people) and is in each person's **Mine**. |
 | `note` | Optional detail, kept off the list. |
 | `created` | Shows an age marker after 30 days. |
 
@@ -71,10 +71,10 @@ Thirty days before the token expires, the app adds a flagged task to renew it, o
 
 ## Using it
 
-- **Adding:** pick a topic and an owner, type, tap **+**. The owner starts as you and goes back to you after each task.
+- **Adding:** pick a topic and an owner, type, tap **+**. The owner starts as you and goes back to you after each task; pick **Both** for a task that's both of ours.
 - **Shortcuts in the text:** `!` flags, `search:` files under a topic, `@gal` gives it to Gal. For example: `@gal !search: read the market report`.
 - **A task:** tap it to edit its text, topic, owner or note. ▲ flags it, ◷ marks it waiting, ○ finishes it (with undo).
-- **All | Mine** at the top, and the state chips under it, choose what you see. Both are remembered on that device.
+- **All | Mine** at the top, and the state chips under it, choose what you see. **Mine** shows your tasks and the ones that are both of ours. Both choices are remembered on that device.
 - **Reordering:** long-press a row, drag, then tap **Done**.
 - **Offline:** changes wait on the phone and sync when you're back online.
 - **In a computer browser:** the list sits in a centred column. ▲ and ◷ show when you hover a row, the ⠿ handle on its left drags it, and **N** jumps to the add box. Hover the note icon to see a note's first line.
@@ -87,6 +87,8 @@ Thirty days before the token expires, the app adds a flagged task to renew it, o
 python tools/tasks.py list --mine
 python tools/tasks.py add "@gal !search: read the market report"
 python tools/tasks.py own t_ab12cd34ef gal
+python tools/tasks.py own t_ab12cd34ef both
+python tools/tasks.py list --owner both
 python tools/tasks.py done t_ab12
 
 python tools/people.py list --tag baking
