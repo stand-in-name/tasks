@@ -37,7 +37,7 @@ def row(page, text):
 def texts(page):
     """Task texts on screen, without the owner badge and markers."""
     return page.locator(".task-text").evaluate_all(
-        "els => els.filter(e => e.offsetParent !== null).map(e => e.firstChild.textContent.trim())")
+        "els => els.filter(e => e.offsetParent !== null).map(e => e.querySelector('.label').textContent.trim())")
 
 
 def badges(page):
@@ -98,6 +98,17 @@ def test_new_task_goes_to_the_top_of_its_topic(page):
     add(page, "first", "search")
     add(page, "second", "search")
     assert texts(page) == ["second", "first"]
+
+
+def test_a_tapped_reference_is_copied_for_a_chat_and_opens_nothing(page):
+    add(page, "map the field", "search")
+    add(page, "call Dana", "network")
+    ref = row(page, "map the field").locator(".ref")
+    assert ref.inner_text() == "S-1" and row(page, "call Dana").locator(".ref").inner_text() == "N-2"
+    ref.click()
+    assert not page.locator("#detail").evaluate("d => d.open")
+    # Copied where the engine allows it; otherwise the line is shown to copy by hand.
+    assert page.inner_text("#snackbar-text") in ("Copied S-1", "S-1 map the field")
 
 
 def test_hebrew_task_renders_right_to_left(page):

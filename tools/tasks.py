@@ -24,13 +24,19 @@ Every task belongs to someone. A task with no owner belongs to both of you:
 people), and `--mine` and `--owner <person>` include it. Give a task to both
 with the owner 'both'.
 
+A task is named by its reference: its topic's letter and its number, S-12.
+The number is the key and is never reused; the letter follows the topic, so a
+task moved from Inbox to Search turns I-12 into S-12, and 12 finds it either
+way. Its id (t_ab12cd34ef) and the id's start still work.
+
 Examples:
   tasks.py list
   tasks.py list --mine --state flagged
   tasks.py add "call Dana about the workshop" --topic network --flag
   tasks.py add "@gal !search: read the market report"
-  tasks.py own t_ab12cd34ef gal
-  tasks.py own t_ab12cd34ef both
+  tasks.py own S-12 gal
+  tasks.py own 12 both
+  tasks.py done S-12
   tasks.py done t_ab12
 """
 
@@ -71,7 +77,7 @@ DEFAULT_PEOPLE = [
     {"id": "gal", "name": "Gal"},
 ]
 
-TOP_KEYS = ["version", "topics", "people", "tasks"]
+TOP_KEYS = ["version", "topics", "people", "nextNum", "tasks"]
 GLYPH = {"flagged": "▲", "waiting": "◷", "normal": " "}
 
 
@@ -80,6 +86,7 @@ def empty_state():
         "version": 1,
         "topics": [dict(t) for t in DEFAULT_TOPICS],
         "people": [dict(p) for p in DEFAULT_PEOPLE],
+        "nextNum": 1,
         "tasks": [],
     }
 
@@ -100,20 +107,72 @@ def _js_string(v):
     return str(v)
 
 
+def _is_num(n):
+    return isinstance(n, int) and not isinstance(n, bool) and n > 0
+
+
 def normalize_task(t):
     owner = t.get("owner")
-    return _with_extras(
+    known = {"id": _js_string(t["id"])}
+    if _is_num(t.get("num")):
+        known["num"] = t["num"]
+    known.update(
         {
-            "id": _js_string(t["id"]),
             "text": t["text"],
             "topic": _js_string(t.get("topic") or "inbox"),
             "state": t.get("state") if t.get("state") in STATES else "normal",
             "owner": owner if isinstance(owner, str) and owner else None,
             "note": t.get("note") if isinstance(t.get("note"), str) else "",
             "created": t.get("created") or None,
-        },
-        t,
+        }
     )
+    return _with_extras(known, t)
+
+
+# --- numbers: mirrors logic.js. The number is the key; the letter follows the
+# topic, so I-12 moved to Search is S-12, and 12 finds it either way. nextNum
+# is the counter, so a finished task's number never comes back.
+
+def next_number(state):
+    nxt = state.get("nextNum") if _is_num(state.get("nextNum")) else 1
+    for t in state["tasks"]:
+        if _is_num(t.get("num")) and t["num"] >= nxt:
+            nxt = t["num"] + 1
+    return nxt
+
+
+def with_numbers(state):
+    """Numbers every task that has none, oldest first, the same way in every copy."""
+    nxt = next_number(state)
+    missing = sorted(
+        (t for t in state["tasks"] if not _is_num(t.get("num"))),
+        key=lambda t: (str(t.get("created") or ""), t["id"]),
+    )
+    if not missing and state.get("nextNum") == nxt:
+        return state
+    given = {}
+    for t in missing:
+        given[t["id"]] = nxt
+        nxt += 1
+    tasks = []
+    for t in state["tasks"]:
+        if t["id"] in given:
+            t = _with_extras({"id": t["id"], "num": given[t["id"]]}, t)
+        tasks.append(t)
+    return dict(state, nextNum=nxt, tasks=tasks)
+
+
+def topic_letter(topic):
+    if not topic:
+        return "?"
+    own = topic.get("letter").strip() if isinstance(topic.get("letter"), str) else ""
+    return (own or str(topic.get("title") or topic["id"]).strip()[:1] or "?").upper()
+
+
+def task_ref(state, task):
+    known = {t["id"]: t for t in state["topics"]}
+    topic = known.get(task["topic"]) or known.get("inbox")
+    return f"{topic_letter(topic)}-{task.get('num')}"
 
 
 def deserialize(text):
@@ -154,12 +213,13 @@ def deserialize(text):
         "version": version if isinstance(version, (int, float)) and not isinstance(version, bool) else 1,
         "topics": topics,
         "people": people,
+        "nextNum": raw.get("nextNum"),
         "tasks": tasks,
     }
     for k, v in raw.items():
         if k not in TOP_KEYS:
             state[k] = v
-    return state
+    return with_numbers(state)
 
 
 def serialize(state):
@@ -168,6 +228,7 @@ def serialize(state):
             "version": state.get("version") or 1,
             "topics": state["topics"],
             "people": state.get("people") or [],
+            "nextNum": next_number(state),
             "tasks": state["tasks"],
         },
         state,
@@ -207,7 +268,15 @@ def apply_mutation(state, m):
         if any(t["id"] == m["task"]["id"] for t in state["tasks"]):
             return state
         index = m.get("index")
-        return dict(state, tasks=_insert_into_topic(state["tasks"], normalize_task(m["task"]), 0 if index is None else index))
+        # Numbered here, not when the mutation is built, so a change replayed on
+        # a fresher board takes the next free number there. An undone finish
+        # keeps its own number, unless another task holds it.
+        task = normalize_task(m["task"])
+        nxt = next_number(state)
+        if not _is_num(task.get("num")) or any(t.get("num") == task["num"] for t in state["tasks"]):
+            task = _with_extras({"id": task["id"], "num": nxt}, task)
+        next_num = max(nxt, task["num"] + 1)
+        return dict(state, nextNum=next_num, tasks=_insert_into_topic(state["tasks"], task, 0 if index is None else index))
     if op == "setState":
         if m.get("state") not in STATES:
             return state
@@ -619,7 +688,23 @@ def resolve_owner(state, name):
     return found
 
 
+REF = re.compile(r"^#?(?:([A-Za-z])-?)?(\d+)$")
+
+
 def find_task(state, ref):
+    """A task by its reference (S-12, 12 or #12) or by its id or the id's start.
+    The number is the key: a letter that no longer matches the task's topic
+    means it moved, and only earns a warning."""
+    m = REF.match(ref.strip())
+    if m:
+        num = int(m.group(2))
+        hit = next((t for t in state["tasks"] if t.get("num") == num), None)
+        if not hit:
+            raise BoardError(f"no task {ref}: it was finished, or never existed")
+        now = task_ref(state, hit)
+        if m.group(1) and m.group(1).upper() != now.split("-")[0]:
+            print(f"note: {ref} is now {now}; it moved topic", file=sys.stderr)
+        return hit
     exact = [t for t in state["tasks"] if t["id"] == ref]
     if exact:
         return exact[0]
@@ -664,7 +749,7 @@ def print_tasks(state, tasks):
         print(topic["title"].upper())
         for t in rows:
             note = " ¶" if t["note"] else ""
-            print(f"  {t['id']}  {GLYPH[t['state']]}  {t['text']}{note}  [{owner_label(state, t['owner'])}]")
+            print(f"  {task_ref(state, t):<6} {GLYPH[t['state']]}  {t['text']}{note}  [{owner_label(state, t['owner'])}]")
 
 
 def cmd_list(args, backend):
@@ -714,8 +799,9 @@ def cmd_add(args, backend):
             "state": task_state, "owner": owner, "note": args.note or "", "created": now_iso(),
         },
     }
-    backend.update([m])
-    print(m["task"]["id"])
+    after = backend.update([m])
+    added = next(t for t in after["tasks"] if t["id"] == m["task"]["id"])
+    print(task_ref(after, added))
 
 
 def _single(op_builder):
@@ -723,8 +809,9 @@ def _single(op_builder):
         state = backend.load()
         task = find_task(state, args.id)
         m = op_builder(args, state, task)
-        backend.update([m])
-        print(f"{task['id']}  {commit_message([m])[len('tasks: '):]}")
+        after = backend.update([m])
+        moved = next((t for t in after["tasks"] if t["id"] == task["id"]), task)
+        print(f"{task_ref(after, moved)}  {commit_message([m])[len('tasks: '):]}")
     return run
 
 
@@ -754,7 +841,7 @@ def cmd_show(args, backend):
         print(json.dumps(t, indent=2, ensure_ascii=False))
         return
     print(t["text"])
-    print(f"  id: {t['id']}   topic: {t['topic']}   state: {t['state']}   owner: {owner_label(state, t['owner'])}")
+    print(f"  {task_ref(state, t)}   id: {t['id']}   topic: {t['topic']}   state: {t['state']}   owner: {owner_label(state, t['owner'])}")
     print(f"  added: {t['created'] or 'unknown'}")
     if t["note"]:
         print("\n" + t["note"])
@@ -805,32 +892,32 @@ def build_parser():
     for name, fn, help_ in [("flag", cmd_flag, "mark as flagged"), ("wait", cmd_wait, "mark as waiting"),
                             ("normal", cmd_normal, "clear flagged or waiting"), ("done", cmd_done, "finish (removes it)")]:
         s = sub.add_parser(name, help=help_)
-        s.add_argument("id")
+        s.add_argument("id", help="its reference (S-12, 12) or id")
         s.set_defaults(fn=fn)
 
     s = sub.add_parser("own", help="set the owner")
-    s.add_argument("id")
+    s.add_argument("id", help="its reference (S-12, 12) or id")
     s.add_argument("person", help="a person, 'me' or 'both'")
     s.set_defaults(fn=cmd_own)
 
     s = sub.add_parser("note", help="replace the note")
-    s.add_argument("id")
+    s.add_argument("id", help="its reference (S-12, 12) or id")
     s.add_argument("note")
     s.set_defaults(fn=cmd_note)
 
     s = sub.add_parser("edit", help="replace the text")
-    s.add_argument("id")
+    s.add_argument("id", help="its reference (S-12, 12) or id")
     s.add_argument("text")
     s.set_defaults(fn=cmd_edit)
 
     s = sub.add_parser("move", help="move to another topic")
-    s.add_argument("id")
+    s.add_argument("id", help="its reference (S-12, 12) or id")
     s.add_argument("topic")
     s.add_argument("--index", type=int, default=0, help="position in the topic (0 = top)")
     s.set_defaults(fn=cmd_move)
 
     s = sub.add_parser("show", help="show one task with its note")
-    s.add_argument("id")
+    s.add_argument("id", help="its reference (S-12, 12) or id")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_show)
 

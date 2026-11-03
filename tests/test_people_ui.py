@@ -234,7 +234,7 @@ def test_a_person_becomes_a_task_on_the_board(page):
     assert page.evaluate("() => window.__tasks.sync.state.tasks[0].owner") is None
     press(page, "pdetail", "#pdetail button[value=cancel]")
     page.click("#list-tasks")
-    assert page.locator(".task-text").first.inner_text().startswith("Talk to Dana Levi")
+    assert page.locator(".task-text .label").first.inner_text().startswith("Talk to Dana Levi")
 
 
 def test_remove_and_undo(page):

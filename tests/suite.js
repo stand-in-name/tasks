@@ -59,6 +59,49 @@ export function runLogic() {
     eq(ids(s, 'network'), ['z', 'a', 'b', 'c']);
   });
 
+  check('add numbers a task, and a replay on a fresher board takes the next free number', () => {
+    const m = L.addMutation({ text: 'fresh', topic: 'search', now: T0, id: 'z' });
+    const s = L.applyMutation(seed(), m);
+    eq(find(s, 'z').num, 5);
+    eq(L.taskRef(s, find(s, 'z')), 'S-5');
+    eq(s.nextNum, 6);
+    // Someone else added first: the same mutation, replayed, takes 6.
+    const other = L.applyMutation(seed(), L.addMutation({ text: 'theirs', now: T0, id: 'y' }));
+    eq(find(L.applyMutation(other, m), 'z').num, 6);
+    ok(m.task.num === undefined, 'the mutation itself stays unnumbered');
+  });
+
+  check('a finished task keeps its number when undone, and its number is never reused', () => {
+    let s = seed();
+    const d = find(s, 'd');
+    s = L.applyMutation(s, { op: 'delete', id: 'd' });
+    s = L.applyMutation(s, L.addMutation({ text: 'new', now: T0, id: 'n' }));
+    eq(find(s, 'n').num, 5);
+    s = L.applyMutation(s, { op: 'restore', index: 0, task: d });
+    eq(find(s, 'd').num, 4);
+  });
+
+  check('the letter follows the topic; a topic may set its own', () => {
+    let s = L.applyMutation(seed(), { op: 'move', id: 'a', topic: 'search', index: 0 });
+    eq(L.taskRef(s, find(s, 'a')), 'S-1');
+    eq(L.refLine(s, find(s, 'a')), 'S-1 net one');
+    s = { ...s, topics: s.topics.map((t) => (t.id === 'search' ? { ...t, letter: 'r' } : t)) };
+    eq(L.taskRef(s, find(s, 'a')), 'R-1');
+    eq(L.taskRef(s, { ...find(s, 'a'), topic: 'gone' }), 'I-1');
+  });
+
+  check('a board from before numbers is numbered oldest first, the same in every copy', () => {
+    const raw = { tasks: [
+      { id: 'b', text: 'newer', created: '2026-02-01T00:00:00.000Z' },
+      { id: 'a', text: 'older', created: T0 },
+      { id: 'c', text: 'kept', num: 7 },
+    ] };
+    const s = L.deserialize(JSON.stringify(raw));
+    eq(s.tasks.map((t) => t.num), [9, 8, 7]);
+    eq(s.nextNum, 10);
+    eq(L.serialize(L.deserialize(L.serialize(s))), L.serialize(s));
+  });
+
   check('add does not disturb other topics', () => {
     const s = L.applyMutation(seed(), L.addMutation({ text: 'fresh', topic: 'network', now: T0, id: 'z' }));
     eq(ids(s, 'search'), ['d']);
@@ -230,8 +273,8 @@ export function runLogic() {
 
   check('serialize writes keys in one fixed order', () => {
     const t = L.deserialize(L.serialize(seed())).tasks[0];
-    eq(Object.keys(t), ['id', 'text', 'topic', 'state', 'owner', 'note', 'created']);
-    eq(Object.keys(JSON.parse(L.serialize(seed()))), ['version', 'topics', 'people', 'tasks']);
+    eq(Object.keys(t), ['id', 'num', 'text', 'topic', 'state', 'owner', 'note', 'created']);
+    eq(Object.keys(JSON.parse(L.serialize(seed()))), ['version', 'topics', 'people', 'nextNum', 'tasks']);
   });
 
   check('fields this version does not know survive a round trip', () => {

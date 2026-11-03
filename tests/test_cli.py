@@ -167,11 +167,59 @@ def test_list_json_is_the_raw_tasks(boardfile):
 
 
 def test_add_defaults_to_me_and_lands_on_top_of_its_topic(boardfile):
-    new_id = run("--file", str(boardfile), "add", "draft the weekly plan", "--topic", "search",
-                 env={"TASKS_ME": "gur"}).stdout.strip()
+    ref = run("--file", str(boardfile), "add", "draft the weekly plan", "--topic", "search",
+              env={"TASKS_ME": "gur"}).stdout.strip()
     tasks = load(boardfile)["tasks"]
-    assert tasks[0]["id"] == new_id and tasks[0]["owner"] == "gur" and tasks[0]["topic"] == "search"
-    assert new_id.startswith("t_") and len(new_id) == 12
+    assert tasks[0]["owner"] == "gur" and tasks[0]["topic"] == "search"
+    assert tasks[0]["id"].startswith("t_") and len(tasks[0]["id"]) == 12
+    assert ref == "S-4" and tasks[0]["num"] == 4
+
+
+# --- references: the topic's letter and a number that is never reused ---------------
+
+def test_a_board_without_numbers_is_numbered_oldest_first(tmp_path):
+    f = tmp_path / "tasks.json"
+    s = board()
+    s["tasks"][0]["created"] = "2026-02-01T00:00:00.000Z"
+    f.write_text(T.serialize(s), encoding="utf-8")
+    out = run("--file", str(f), "list").stdout
+    assert "S-3    ▲  map the field" in out
+    assert "S-1       check the grant rules" in out
+    assert "N-2    ◷  call Dana" in out
+
+
+def test_a_task_is_found_by_its_reference_or_its_number(boardfile):
+    f = str(boardfile)
+    assert "map the field" in run("--file", f, "show", "S-1").stdout
+    assert "map the field" in run("--file", f, "show", "#1").stdout
+    assert "call Dana" in run("--file", f, "show", "n3").stdout
+    run("--file", f, "own", "3", "gal")
+    assert next(t for t in load(boardfile)["tasks"] if t["id"] == "t_bbb333")["owner"] == "gal"
+
+
+def test_a_moved_task_keeps_its_number_and_takes_the_new_letter(boardfile):
+    f = str(boardfile)
+    assert run("--file", f, "move", "N-3", "search").stdout.startswith("S-3")
+    res = run("--file", f, "show", "N-3")
+    assert "call Dana" in res.stdout and "N-3 is now S-3" in res.stderr
+
+
+def test_a_finished_tasks_number_is_never_given_again(boardfile):
+    f = str(boardfile)
+    assert run("--file", f, "add", "one").stdout.strip() == "I-4"
+    run("--file", f, "done", "I-4")
+    assert "no task 4" in run("--file", f, "show", "4", check=False).stderr
+    assert run("--file", f, "add", "two").stdout.strip() == "I-5"
+    assert load(boardfile)["nextNum"] == 6
+
+
+def test_a_topic_can_have_its_own_letter(tmp_path):
+    f = tmp_path / "tasks.json"
+    s = board()
+    s["topics"] = [dict(t, letter="R") if t["id"] == "search" else t for t in s["topics"]]
+    f.write_text(T.serialize(s), encoding="utf-8")
+    assert "R-1" in run("--file", str(f), "list").stdout
+    assert "map the field" in run("--file", str(f), "show", "R-1").stdout
 
 
 def test_add_shortcuts_and_flags(boardfile):
@@ -254,9 +302,10 @@ def clone(remote, where):
 
 def test_git_add_commits_and_pushes(remote, tmp_path):
     a = clone(remote, tmp_path / "a")
-    new_id = run("--clone", str(a), "add", "from an agent", "--owner", "gal").stdout.strip()
+    ref = run("--clone", str(a), "add", "from an agent", "--owner", "gal").stdout.strip()
     check = clone(remote, tmp_path / "check")
-    assert new_id in [t["id"] for t in load(check / "tasks.json")["tasks"]]
+    added = next(t for t in load(check / "tasks.json")["tasks"] if t["text"] == "from an agent")
+    assert ref == f"I-{added['num']}"
     assert "tasks: add from an agent" in git(check, "log", "-1", "--format=%s")
 
 
@@ -270,6 +319,8 @@ def test_git_writers_who_collide_both_land(remote, tmp_path):
     s = load(check / "tasks.json")
     texts = [t["text"] for t in s["tasks"]]
     assert "first, from A" in texts and "second, from B" in texts
+    nums = [t["num"] for t in s["tasks"]]
+    assert len(set(nums)) == len(nums), "two writers at once must never share a number"
     assert next(t for t in s["tasks"] if t["id"] == "t_bbb333")["owner"] == "gal"
 
 

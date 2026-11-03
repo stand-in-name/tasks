@@ -180,6 +180,11 @@ body {
   cursor: pointer;
   word-break: break-word;
 }
+.task-text .ref {
+  display: inline-block; margin-inline-end: 6px; padding: 0 2px;
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+  font-variant-numeric: tabular-nums; cursor: copy;
+}
 .task-text .age {
   display: inline-block; margin-inline-start: 8px;
   font-size: 11px; color: var(--stale); white-space: nowrap;
@@ -506,6 +511,7 @@ select {
     padding: 9px 0; font-size: 15px; line-height: 1.4;
   }
   .task-text .label { flex: 1 1 auto; min-width: 0; }
+  .task-text .ref { flex: 0 0 auto; min-width: 34px; margin-inline-end: 0; }
   .task-text .age, .task-text .has-note, .task-text .owner { flex: 0 0 auto; margin-inline-start: 0; }
   .task-text .age { order: 1; }
   .task-text .has-note { order: 2; align-self: center; }

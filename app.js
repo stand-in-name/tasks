@@ -5,6 +5,7 @@
 import {
   grouped, counts, isStale, daysOld, ownerLabel, sharedLabel, ownedBy,
   addMutation, toggleStateMutation, makeId, parseQuickAdd, effectiveTopic, resolveTopic,
+  taskRef, refLine,
 } from './logic.js';
 import * as P from './people.js';
 import { GitHubStore, LocalStore } from './store.js';
@@ -220,7 +221,18 @@ function taskRow(task, now, ownerShown) {
   const label = document.createElement('span');
   label.className = 'label';
   label.textContent = task.text;
-  text.append(label);
+  // The task's reference, S-12. Tapping it copies the reference and the text,
+  // to paste into a chat that works on the task.
+  const ref = document.createElement('span');
+  ref.className = 'ref';
+  ref.dir = 'ltr';
+  ref.textContent = taskRef(sync.state, task);
+  ref.title = 'Copy for a chat';
+  ref.addEventListener('click', (e) => {
+    e.stopPropagation(); // copy, don't open the edit sheet
+    if (!reordering) copyRef(task);
+  });
+  text.append(ref, label);
   // A task with no owner belongs to all of us, and says so, in Mine too. The
   // other badges drop out in Mine, where they would all say the same name.
   if (!task.owner) {
@@ -279,6 +291,16 @@ function taskRow(task, now, ownerShown) {
   li.append(grip, done, text, flag, wait);
   attachLongPress(li);
   return li;
+}
+
+async function copyRef(task) {
+  const line = refLine(sync.state, task);
+  try {
+    await navigator.clipboard.writeText(line);
+    showNote(`Copied ${taskRef(sync.state, task)}`);
+  } catch {
+    showNote(line); // no clipboard: show it, to copy by hand
+  }
 }
 
 function markButton(cls, glyph, label, onClick) {
@@ -772,9 +794,9 @@ function openDetail(task) {
   fillTopicSelect($('d-topic'), sync.state, effectiveTopic(sync.state, task));
   fillOwnerSelect($('d-owner'), sync.state, task.owner || '', sharedLabel(sync.state));
   $('d-owner-field').hidden = !hasPeople() && !task.owner;
-  $('d-age').textContent = task.created
+  $('d-age').textContent = `${taskRef(sync.state, task)} · ` + (task.created
     ? `Added ${new Date(task.created).toLocaleDateString()} — ${daysOld(task, new Date().toISOString())} days ago`
-    : '';
+    : '');
   $('detail').showModal();
 }
 

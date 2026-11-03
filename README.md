@@ -18,6 +18,7 @@ The code and the tasks sit in separate repos because the token is stored in your
 
 | Field | |
 |---|---|
+| `num` | Its number, given when it's saved. Never reused: `nextNum` at the top of the file is the counter. |
 | `text` | One line. |
 | `topic` | The section it sits under. A task whose topic no longer exists shows under Inbox. |
 | `state` | `normal`, `flagged` or `waiting`; one at a time. |
@@ -26,6 +27,8 @@ The code and the tasks sit in separate repos because the token is stored in your
 | `created` | Shows an age marker after 30 days. |
 
 Done means deleted; the Git history is the archive. The board's topics and people are listed in `tasks.json`. Edit them there.
+
+**A task's reference** is its topic's letter and its number: `S-12` for a Search task. It's how you name a task to a chat, and tapping it on the row copies the reference and the text, ready to paste. The number is the key; the letter follows the topic, so a task moved from Inbox to Search turns `I-12` into `S-12`, and `tasks.py` finds it as `S-12`, `I-12` or `12`. The letter is the first of the topic's title; give a topic a `letter` in `tasks.json` when two topics start with the same one.
 
 ## The People list
 
@@ -73,7 +76,7 @@ Thirty days before the token expires, the app adds a flagged task to renew it, o
 
 - **Adding:** pick a topic and an owner, type, tap **+**. The owner starts as you and goes back to you after each task; pick **Both** for a task that's both of ours.
 - **Shortcuts in the text:** `!` flags, `search:` files under a topic, `@gal` gives it to Gal. For example: `@gal !search: read the market report`.
-- **A task:** tap it to edit its text, topic, owner or note. ▲ flags it, ◷ marks it waiting, ○ finishes it (with undo).
+- **A task:** tap its reference (`S-12`) to copy it with the text, for a chat. Tap the rest to edit its text, topic, owner or note. ▲ flags it, ◷ marks it waiting, ○ finishes it (with undo).
 - **All | Mine** at the top, and the state chips under it, choose what you see. **Mine** shows your tasks and the ones that are both of ours. Both choices are remembered on that device.
 - **Reordering:** long-press a row, drag, then tap **Done**.
 - **Offline:** changes wait on the phone and sync when you're back online.

@@ -27,7 +27,7 @@ export const STALE_DAYS = 30;
 const copy = (list) => list.map((x) => ({ ...x }));
 
 export function emptyState(topics = DEFAULT_TOPICS, people = DEFAULT_PEOPLE) {
-  return { version: 1, topics: copy(topics), people: copy(people), tasks: [] };
+  return { version: 1, topics: copy(topics), people: copy(people), nextNum: 1, tasks: [] };
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -37,6 +37,52 @@ export function makeId(rand = Math.random) {
   let s = '';
   for (let i = 0; i < 10; i++) s += 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(rand() * 36)];
   return 't_' + s;
+}
+
+// --- numbers ---------------------------------------------------------------
+// Every task has a number that is never reused, and a reference made of its
+// topic's letter and that number: S-12. The number alone is the key; the letter
+// follows the topic, so a task moved from Inbox to Search turns I-12 into S-12
+// and 12 still finds it. nextNum is the counter, so a finished task's number
+// doesn't come back.
+
+const isNum = (n) => Number.isInteger(n) && n > 0;
+
+export function nextNumber(state) {
+  let next = isNum(state.nextNum) ? state.nextNum : 1;
+  for (const t of state.tasks) if (isNum(t.num) && t.num >= next) next = t.num + 1;
+  return next;
+}
+
+// Gives every task without a number one, oldest first, so a board from before
+// numbers, or a hand-edited task, numbers the same way in every copy.
+export function withNumbers(state) {
+  let next = nextNumber(state);
+  const missing = state.tasks
+    .filter((t) => !isNum(t.num))
+    .sort((a, b) => String(a.created || '').localeCompare(String(b.created || '')) || a.id.localeCompare(b.id));
+  if (!missing.length && state.nextNum === next) return state;
+  const given = new Map(missing.map((t) => [t.id, next++]));
+  const tasks = state.tasks.map((t) => (given.has(t.id) ? normalizeTask({ ...t, num: given.get(t.id) }) : t));
+  return { ...state, nextNum: next, tasks };
+}
+
+// A topic's own `letter`, if the board file gives one; otherwise the first
+// letter of its title.
+export function topicLetter(topic) {
+  if (!topic) return '?';
+  const own = typeof topic.letter === 'string' && topic.letter.trim();
+  return (own || String(topic.title || topic.id).trim().charAt(0) || '?').toUpperCase();
+}
+
+export function taskRef(state, task) {
+  const topic = state.topics.find((t) => t.id === effectiveTopic(state, task));
+  return `${topicLetter(topic)}-${task.num}`;
+}
+
+// What tapping a task's reference copies, for pasting into a chat.
+export function refLine(state, task) {
+  return `${taskRef(state, task)} ${task.text}`;
 }
 
 export function topicIds(state) {
@@ -97,7 +143,15 @@ export function applyMutation(state, m) {
     case 'add':
     case 'restore': {
       if (state.tasks.some((t) => t.id === m.task.id)) return state;
-      return { ...state, tasks: insertIntoTopic(state.tasks, normalizeTask(m.task), m.index ?? 0) };
+      // The number is given here, not when the mutation is built, so a change
+      // replayed on a fresher board takes the next free number there. An undone
+      // finish keeps its own number, unless another task holds it.
+      const next = nextNumber(state);
+      const own = m.task.num;
+      const num = isNum(own) && !state.tasks.some((t) => t.num === own) ? own : next;
+      const task = normalizeTask({ ...m.task, num });
+      const nextNum = Math.max(next, task.num + 1);
+      return { ...state, nextNum, tasks: insertIntoTopic(state.tasks, task, m.index ?? 0) };
     }
     case 'setState': {
       if (!STATES.includes(m.state)) return state;
@@ -269,7 +323,7 @@ export function resolvePerson(state, name) {
 // not a reformat. Fields this version doesn't know are kept, after the known
 // ones: an older copy of the app must never strip what a newer writer added.
 
-const TOP_KEYS = ['version', 'topics', 'people', 'tasks'];
+const TOP_KEYS = ['version', 'topics', 'people', 'nextNum', 'tasks'];
 
 function withExtras(known, raw) {
   for (const [k, v] of Object.entries(raw)) if (!(k in known)) known[k] = v;
@@ -277,15 +331,16 @@ function withExtras(known, raw) {
 }
 
 function normalizeTask(t) {
-  return withExtras({
-    id: String(t.id),
+  const known = { id: String(t.id) };
+  if (isNum(t.num)) known.num = t.num;
+  return withExtras(Object.assign(known, {
     text: String(t.text),
     topic: String(t.topic || 'inbox'),
     state: STATES.includes(t.state) ? t.state : 'normal',
     owner: typeof t.owner === 'string' && t.owner ? t.owner : null,
     note: typeof t.note === 'string' ? t.note : '',
     created: t.created || null,
-  }, t);
+  }), t);
 }
 
 export function serialize(state) {
@@ -293,6 +348,7 @@ export function serialize(state) {
     version: state.version || 1,
     topics: state.topics,
     people: state.people || [],
+    nextNum: nextNumber(state),
     tasks: state.tasks,
   }, state);
   return JSON.stringify(out, null, 2) + '\n';
@@ -321,8 +377,9 @@ export function deserialize(text) {
     version: typeof raw.version === 'number' ? raw.version : 1,
     topics,
     people,
+    nextNum: raw.nextNum,
     tasks,
   };
   for (const [k, v] of Object.entries(raw)) if (!TOP_KEYS.includes(k)) state[k] = v;
-  return state;
+  return withNumbers(state);
 }
